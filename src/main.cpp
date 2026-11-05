@@ -674,6 +674,19 @@ void loadAll()
 void saveAll()
 {
   // Penyimpanan file bersifat opsional; tidak ada data yang berubah pada stub ini.
+  std::ofstream userFile("users.txt");
+  if (userFile.is_open())
+  {
+    for (int i = 0; i < userCount; i++)
+    {
+      userFile << sanitizeField(userName[i]) << "|"
+               << sanitizeField(userPassword[i]) << "|"
+               << sanitizeField(userPhone[i]) << "|"
+               << userFailed[i] << "|"
+               << (userLocked[i] ? 1 : 0) << "\n";
+    }
+    userFile.close();
+  }
 }
 
 // Done
@@ -935,7 +948,22 @@ int searchAvailableItems(std::string keyword, std::string category,
 // tipe return fungsi ini tanpa lapor semua pemilik modul.
 int listItemsByReporter(int reporterIndex)
 {
-  (void)reporterIndex; // hapus komentar ini setelah dipakai
+  std::ofstream foundFile("found_items.txt");
+  if (foundFile.is_open())
+  {
+    for (int i = 0; i < foundCount; i++)
+    {
+      foundFile << foundReporter[i] << "|"
+                << sanitizeField(foundName[i]) << "|"
+                << sanitizeField(foundCategory[i]) << "|"
+                << sanitizeField(foundLocation[i]) << "|"
+                << foundDate[i] << "|"
+                << sanitizeField(foundDescription[i]) << "|"
+                << sanitizeField(foundSecret[i]) << "|"
+                << foundStatus[i] << "\n";
+    }
+    foundFile.close();
+  }
   searchResultCount = 0;
   return 0;
 }
@@ -1054,6 +1082,50 @@ int submitClaim(int claimantIndex, int itemIndex, std::string secretAnswer)
 // JANGAN ubah nama, parameter, atau tipe return fungsi ini tanpa lapor semua pemilik modul.
 void showRegisterScreen()
 {
+  printHeader("Register");
+
+  std::string username = trim(readLine("Username: "));
+  std::string password = readLine("Password (min 6 karakter): ");
+  std::string phone = trim(readLine("Nomor telepon: "));
+
+  int result = registerUser(username, password, phone);
+
+  if (result == REG_OK)
+  {
+    std::cout << "Registrasi berhasil! Silakan login.\n";
+    saveAll();
+  }
+  else if (result == REG_EMPTY_FIELD)
+  {
+    std::cout << "Gagal: Semua kolom harus diisi.\n";
+  }
+  else if (result == REG_USERNAME_HAS_SPACE)
+  {
+    std::cout << "Gagal: Username tidak boleh mengandung spasi.\n";
+  }
+  else if (result == REG_DUPLICATE)
+  {
+    std::cout << "Gagal: Username sudah digunakan.\n";
+  }
+  else if (result == REG_PASSWORD_SHORT)
+  {
+    std::cout << "Gagal: Password minimal " << MIN_PASSWORD_LENGTH
+              << " karakter.\n";
+  }
+  else if (result == REG_PHONE_INVALID)
+  {
+    std::cout << "Gagal: Nomor telepon hanya boleh berisi angka.\n";
+  }
+  else if (result == REG_FULL)
+  {
+    std::cout << "Gagal: Kapasitas pengguna sudah penuh.\n";
+  }
+  else
+  {
+    std::cout << "Gagal: Terjadi kesalahan yang tidak diketahui.\n";
+  }
+
+  pauseScreen();
   // Stub layar: isi setelah registerUser selesai dikerjakan.
 }
 
@@ -1071,8 +1143,43 @@ void showRegisterScreen()
 // JANGAN ubah nama, parameter, atau tipe return fungsi ini tanpa lapor semua pemilik modul.
 int showLoginScreen()
 {
-  // Stub aman: -1 berarti kembali ke menu tamu.
+    printHeader("Login");
+
+  std::string username = trim(readLine("Username: "));
+  std::string password = readLine("Password: ");
+
+  int result = loginUser(username, password);
+
+  if (result >= 0)
+  {
+    std::cout << "Selamat datang, " << userName[result] << "!\n";
+    saveAll(); // failed count direset ke 0
+    return result;
+  }
+
+  if (result == LOGIN_NOT_FOUND)
+  {
+    std::cout << "Akun tidak ditemukan.\n";
+  }
+  else if (result == LOGIN_WRONG_PASSWORD)
+  {
+    std::cout << "Password salah.\n";
+    saveAll(); // jumlah gagal berubah
+  }
+  else if (result == LOGIN_LOCKED)
+  {
+    std::cout << "Akun terkunci karena terlalu banyak percobaan gagal.\n";
+    saveAll(); // status locked berubah
+  }
+  else
+  {
+    std::cout << "Terjadi kesalahan yang tidak diketahui.\n";
+  }
+
+  pauseScreen();
   return -1;
+  // Stub aman: -1 berarti kembali ke menu tamu.
+
 }
 
 // FUNGSI: showReportFoundScreen   (flowchart: "Input temuan" -> "addFoundItem" -> "Pesan")
@@ -1206,7 +1313,30 @@ void showReportLostScreen(int userIndex, std::string prefillName)
 // nama, parameter, atau tipe return fungsi ini tanpa lapor semua pemilik modul.
 void showMyReportsScreen(int userIndex)
 {
-  (void)userIndex; // hapus komentar ini setelah dipakai
+  printHeader("Laporan Saya");
+
+  int count = listItemsByReporter(userIndex);
+
+  if (count == 0)
+  {
+    std::cout << "Kamu belum memiliki laporan barang temuan.\n";
+    pauseScreen();
+    return;
+  }
+
+  for (int i = 0; i < searchResultCount; i++)
+  {
+    int index = searchResult[i];
+
+    std::cout << "\nNomor    : " << toDisplayNo(index) << "\n";
+    std::cout << "Nama     : " << foundName[index] << "\n";
+    std::cout << "Lokasi   : " << foundLocation[index] << "\n";
+    std::cout << "Tanggal  : " << foundDate[index] << "\n";
+    std::cout << "Status   : " << foundStatus[index] << "\n";
+    // foundSecret sengaja tidak ditampilkan
+  }
+
+  pauseScreen();
 }
 
 // FUNGSI: showClaimFlowScreen   (flowchart: "Cari" -> "Pilih" -> "Jawab detail" -> "Klaim")
