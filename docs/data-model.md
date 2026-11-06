@@ -15,9 +15,13 @@ Semua data dideklarasikan **sekali** di `src/models/data.cpp`. Satu record adala
 
 | Array | Isi pada indeks `i` |
 | --- | --- |
-| `userName[i]` | username |
+| `userName[i]` | NIM/ID login (nama array lama dipertahankan) |
 | `userPassword[i]` | password polos (latihan saja) |
 | `userPhone[i]` | nomor telepon |
+| `userFullName[i]` | nama lengkap mahasiswa |
+| `userMajor[i]` | jurusan mahasiswa |
+| `userEmail[i]` | email mahasiswa |
+| `userRole[i]` | peran `Mahasiswa` atau `Admin` |
 | `userFailed[i]` | jumlah login salah berturut-turut |
 | `userLocked[i]` | status terkunci |
 
@@ -34,7 +38,15 @@ Record pengguna valid berada pada indeks `0` sampai `userCount - 1`.
 | `foundDate[i]` | tanggal `YYYY-MM-DD` |
 | `foundDescription[i]` | deskripsi umum |
 | `foundSecret[i]` | detail untuk verifikasi klaim, rahasia |
-| `foundStatus[i]` | hanya `Tersedia` atau `Dikembalikan` |
+| `foundStatus[i]` | status, termasuk `Menunggu Dititipkan`, `Reservasi Batal`, `Tersedia`, `Dalam Klaim`, `Pengambilan Terkunci`, `Sudah Diambil`, `Perlu Verifikasi`, atau `Diserahkan ke Kampus` |
+| `foundPhoto[i]` | path foto bukti barang |
+| `foundLocker[i]` | indeks loker 0–8, atau `-1` bila tidak memakai loker |
+| `foundDepositCode[i]` | kode titip aktif, bila ada |
+| `foundReservationExpiry[i]` | waktu kedaluwarsa reservasi sebagai Unix timestamp |
+| `foundClaimant[i]` | indeks pengguna pengklaim, atau `-1` |
+| `foundPickupCode[i]` | kode ambil aktif, bila ada |
+| `foundPickupExpiry[i]` | waktu kedaluwarsa kode ambil sebagai Unix timestamp |
+| `foundPickupFailed[i]` | jumlah percobaan kode ambil salah |
 
 ## Laporan hilang
 
@@ -64,7 +76,7 @@ Storage memakai `data/*.txt`, satu record per baris, pemisah `|`. Semua teks per
 
 | File | Urutan field | Contoh satu baris valid |
 | --- | --- | --- |
-| `data/users.txt` | `username|password|phone|failed|locked(0/1)` | `andi|rahasia|08123456789|0|0` |
-| `data/found_items.txt` | `reporterIndex|name|category|location|date|description|secret|status` | `0|Payung|Aksesoris|Kantin|2025-08-17|Payung hitam|Pegangan kayu|Tersedia` |
+| `data/users.txt` | `nim|password|phone|failed|locked(0/1)|fullName|major|email|role` | `12345|rahasia|08123456789|0|0|Andi|Informatika|andi@example.com|Mahasiswa` |
+| `data/found_items.txt` | `reporterIndex|name|category|location|date|description|secret|status|photo|locker|depositCode|reservationExpiry|claimant|pickupCode|pickupExpiry|pickupFailed` | `0|Payung|Aksesoris|Kantin|2025-08-17|Payung hitam|Pegangan kayu|Tersedia|payung.jpg|0||0|-1||0|0` |
 | `data/lost_reports.txt` | `reporterIndex|name|category|location|date|description` | `1|Dompet|Aksesoris|Perpustakaan|2025-08-16|Warna cokelat` |
 | `data/claim_attempts.txt` | `itemIndex|userIndex|failedCount` | `0|1|2` |

@@ -44,7 +44,7 @@ Semua kode ada dalam satu file: `src/main.cpp`. Setiap pemilik bekerja hanya pad
 - Password disimpan polos (apa adanya). Ini tidak aman untuk aplikasi nyata dan hanya boleh untuk latihan.
 - Akun yang terkunci tidak memiliki jalur buka dari menu; satu-satunya cara saat ini adalah mengedit data.
 - Penyimpanan file `data/*.txt` bersifat opsional. Stub `loadAll`/`saveAll` aman bila belum diisi.
-- Tidak ada admin dan tidak ada penghapusan data pada MVP; indeks array tidak bergeser.
+- Tidak ada penghapusan data; indeks array tidak bergeser. Admin demo (`admin` / `admin123`) saat ini hanya memiliki menu logout sampai modul loker dan anomali ditambahkan.
 
 Baca `docs/data-model.md` sebelum mengubah array dan `docs/TASKS.md` sebelum mulai mengisi TODO.
 
