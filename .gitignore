@@ -1,5 +1,10 @@
 build/
 data/*.txt
+/users.txt
+/found_items.txt
+/lost_reports.txt
+/claims.txt
+/lockers.txt
 *.exe
 *.o
 lostfound

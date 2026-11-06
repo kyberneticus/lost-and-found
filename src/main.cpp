@@ -1,25 +1,32 @@
+#include <cctype>
+#include <climits>
+#include <ctime>
+#include <fstream>
 #include <iostream>
 #include <string>
-#include <cctype>
-#include <fstream>
-#include <ctime>
-#include <climits>
 
 using namespace std;
-
-// Haris
-// ============ data ============
 
 const int MAX_USERS = 100;
 const int MAX_FOUND = 200;
 const int MAX_LOST = 200;
 const int MAX_CLAIMS = 400;
+const int MAX_LOCKERS = 9;
 const int MAX_LOGIN_ATTEMPTS = 3;
 const int MAX_CLAIM_ATTEMPTS = 3;
 const int MIN_PASSWORD_LENGTH = 6;
 
 const std::string STATUS_AVAILABLE = "Tersedia";
 const std::string STATUS_RETURNED = "Dikembalikan";
+const std::string STATUS_DEPOSIT_PENDING = "Menunggu Dititipkan";
+const std::string STATUS_DEPOSIT_CANCELLED = "Reservasi Batal";
+const std::string STATUS_NEEDS_VERIFICATION = "Perlu Verifikasi";
+const std::string STATUS_CLAIM_PENDING = "Dalam Klaim";
+const std::string STATUS_PICKUP_LOCKED = "Pengambilan Terkunci";
+const std::string STATUS_PICKED_UP = "Sudah Diambil";
+const std::string STATUS_CAMPUS_HANDOFF = "Diserahkan ke Kampus";
+const std::string ROLE_STUDENT = "Mahasiswa";
+const std::string ROLE_ADMIN = "Admin";
 
 const int REG_OK = 0;
 const int REG_EMPTY_FIELD = 1;
@@ -38,6 +45,7 @@ const int ITEM_EMPTY_FIELD = 1;
 const int ITEM_INVALID_DATE = 2;
 const int ITEM_FUTURE_DATE = 3;
 const int ITEM_FULL = 4;
+const int ITEM_LOCKER_FULL = 5;
 
 const int CLAIM_APPROVED = 0;
 const int CLAIM_WRONG_DETAIL = 1;
@@ -47,7 +55,14 @@ const int CLAIM_NOT_AVAILABLE = 4;
 const int CLAIM_OWN_ITEM = 5;
 const int CLAIM_STORAGE_FULL = 6;
 
-std::string userName[MAX_USERS], userPassword[MAX_USERS], userPhone[MAX_USERS];
+const int PICKUP_OK = 0;
+const int PICKUP_WRONG_CODE = 1;
+const int PICKUP_EXPIRED = 2;
+const int PICKUP_LOCKED = 3;
+
+std::string userName[MAX_USERS], userPassword[MAX_USERS], userPhone[MAX_USERS],
+    userFullName[MAX_USERS], userMajor[MAX_USERS], userEmail[MAX_USERS],
+    userRole[MAX_USERS];
 int userFailed[MAX_USERS];
 bool userLocked[MAX_USERS];
 int userCount = 0;
@@ -55,7 +70,12 @@ int userCount = 0;
 int foundReporter[MAX_FOUND];
 std::string foundName[MAX_FOUND], foundCategory[MAX_FOUND],
     foundLocation[MAX_FOUND], foundDate[MAX_FOUND], foundDescription[MAX_FOUND],
-    foundSecret[MAX_FOUND], foundStatus[MAX_FOUND];
+    foundSecret[MAX_FOUND], foundStatus[MAX_FOUND], foundPhoto[MAX_FOUND],
+    foundDepositCode[MAX_FOUND], foundPickupCode[MAX_FOUND];
+int foundLocker[MAX_FOUND], foundClaimant[MAX_FOUND],
+    foundPickupFailed[MAX_FOUND];
+long foundReservationExpiry[MAX_FOUND], foundPickupExpiry[MAX_FOUND];
+bool lockerBroken[MAX_LOCKERS];
 int foundCount = 0;
 
 int lostReporter[MAX_LOST];
@@ -69,14 +89,9 @@ int claimCount = 0;
 int searchResult[MAX_FOUND];
 int searchResultCount = 0;
 
-// FUNGSI: loadDemoData   (flowchart: "Data kosong?" -> "Isi contoh")
-// TUJUAN: menyediakan data contoh saat belum ada pengguna atau laporan.
-// Penjelasan: Fungsi ini mengisi dua pengguna dan dua barang temuan hanya jika data utama masih kosong.
-// CONTOH: data kosong -> pengguna Azhri dan Payung Hitam ditambahkan.
-void loadDemoData()
-{
-  if (userCount == 0 && foundCount == 0 && lostCount == 0)
-  {
+// Seeds demo accounts and found items when storage is empty.
+void loadDemoData() {
+  if (userCount == 0 && foundCount == 0 && lostCount == 0) {
 
     userName[0] = "Azhri";
     userPassword[0] = "Azhri123";
@@ -90,6 +105,19 @@ void loadDemoData()
     userFailed[1] = 0;
     userLocked[1] = false;
 
+    userRole[0] = ROLE_STUDENT;
+    userRole[1] = ROLE_STUDENT;
+
+    userName[2] = "admin";
+    userPassword[2] = "admin123";
+    userPhone[2] = "0000000000";
+    userFullName[2] = "Administrator";
+    userMajor[2] = "";
+    userEmail[2] = "";
+    userFailed[2] = 0;
+    userLocked[2] = false;
+    userRole[2] = ROLE_ADMIN;
+
     foundReporter[0] = 0;
     foundName[0] = "Payung Hitam";
     foundCategory[0] = "Aksesori";
@@ -98,109 +126,121 @@ void loadDemoData()
     foundDescription[0] = "Payung lipat warna hitam merk standar";
     foundSecret[0] = "Ada stiker kecil bergambar bintang di pegangannya";
     foundStatus[0] = STATUS_AVAILABLE;
+    foundPhoto[0] = "";
+    foundLocker[0] = -1;
+    foundDepositCode[0] = "";
+    foundReservationExpiry[0] = 0;
+    foundClaimant[0] = -1;
+    foundPickupCode[0] = "";
+    foundPickupExpiry[0] = 0;
+    foundPickupFailed[0] = 0;
 
     foundReporter[1] = 1;
     foundName[1] = "Dompet Kulit Coklat";
     foundCategory[1] = "Dompet";
     foundLocation[1] = "Parkiran Fakultas";
     foundDate[1] = "2026-10-26";
-    foundDescription[1] = "Dompet berisi kartu identitas dan beberapa kartu penting";
+    foundDescription[1] =
+        "Dompet berisi kartu identitas dan beberapa kartu penting";
     foundSecret[1] = "Ada foto pelajar di dalam selipan kartu";
     foundStatus[1] = STATUS_AVAILABLE;
+    foundPhoto[1] = "";
+    foundLocker[1] = -1;
+    foundDepositCode[1] = "";
+    foundReservationExpiry[1] = 0;
+    foundClaimant[1] = -1;
+    foundPickupCode[1] = "";
+    foundPickupExpiry[1] = 0;
+    foundPickupFailed[1] = 0;
 
-    userCount = 2;
+    userCount = 3;
     foundCount = 2;
   }
 }
 
-// Done
-// ============ string_utils ============
+// Creates the demo admin account when no admin exists.
+void ensureDemoAdmin() {
+  for (int i = 0; i < userCount; i++) {
+    if (userRole[i] == ROLE_ADMIN) {
+      return;
+    }
+  }
 
-// FUNGSI: trim   (flowchart: "Teks masuk" -> "Buang spasi tepi")
-// TUJUAN: menghapus spasi di awal dan akhir teks.
-// Penjelasan: Fungsi ini mencari batas karakter bukan spasi lalu mengembalikan bagian teks di antaranya.
-// CONTOH:   buku   -> buku.
-std::string trim(std::string s)
-{
+  if (userCount >= MAX_USERS) {
+    return;
+  }
+
+  userName[userCount] = "admin";
+  userPassword[userCount] = "admin123";
+  userPhone[userCount] = "0000000000";
+  userFullName[userCount] = "Administrator";
+  userMajor[userCount] = "";
+  userEmail[userCount] = "";
+  userFailed[userCount] = 0;
+  userLocked[userCount] = false;
+  userRole[userCount] = ROLE_ADMIN;
+  userCount++;
+}
+
+// Removes leading and trailing spaces from text.
+std::string trim(std::string s) {
   int left = 0;
   int right = s.length();
 
-  while (left < right && s[left] == ' ')
-  {
+  while (left < right && s[left] == ' ') {
     left++;
   }
 
-  while (right > left && s[right - 1] == ' ')
-  {
+  while (right > left && s[right - 1] == ' ') {
     right--;
   }
 
   return s.substr(left, right - left);
 }
 
-// FUNGSI: toLower   (flowchart: "Teks" -> "Huruf kecil")
-// TUJUAN: menyamakan kapitalisasi untuk perbandingan.
-// Penjelasan: Fungsi ini mengubah setiap karakter pada salinan teks menjadi huruf kecil.
-// CONTOH: BukuA -> bukua.
-std::string toLower(std::string s)
-{
+// Converts text to lowercase for case-insensitive comparisons.
+std::string toLower(std::string s) {
   int length = s.length();
-  for (int i = 0; i < length; i++)
-  {
+  for (int i = 0; i < length; i++) {
     s[i] = tolower(s[i]);
   }
 
   return s;
 }
 
-// FUNGSI: containsIgnoreCase   (flowchart: "Normalisasi" -> "Cari kata")
-// TUJUAN: mencari kata tanpa membedakan huruf besar dan kecil.
-// Penjelasan: Fungsi ini menormalkan teks dan kata kunci lalu mencari kecocokan berurutan.
-// CONTOH: Tas Biru, biru -> true.
-bool containsIgnoreCase(std::string text, std::string keyword)
-{
+// Checks whether text contains a keyword without case sensitivity.
+bool containsIgnoreCase(std::string text, std::string keyword) {
   text = toLower(text);
   keyword = toLower(keyword);
 
-  if (keyword == "")
-  {
+  if (keyword == "") {
     return true;
   }
 
   int keywordLength = keyword.length();
   int textLength = text.length();
-  for (int i = 0; i + keywordLength <= textLength; i++)
-  {
+  for (int i = 0; i + keywordLength <= textLength; i++) {
     bool match = true;
 
-    for (int j = 0; j < keywordLength; j++)
-    {
-      if (text[i + j] != keyword[j])
-      {
+    for (int j = 0; j < keywordLength; j++) {
+      if (text[i + j] != keyword[j]) {
         match = false;
         break;
       }
     }
 
-    if (match)
-    {
+    if (match) {
       return true;
     }
   }
   return false;
 }
 
-// FUNGSI: sanitizeField   (flowchart: "Teks input" -> "Teks aman file")
-// TUJUAN: membuat teks aman untuk disimpan dalam satu baris file.
-// Penjelasan: Fungsi ini mengganti delimiter dan karakter baris baru dengan /.
-// CONTOH: A dan B dipisah newline -> A/B.
-std::string sanitizeField(std::string s)
-{
+// Replaces file-delimiter and newline characters in stored text.
+std::string sanitizeField(std::string s) {
   int length = s.length();
-  for (int i = 0; i < length; i++)
-  {
-    if (s[i] == '|' || s[i] == '\n' || s[i] == '\r')
-    {
+  for (int i = 0; i < length; i++) {
+    if (s[i] == '|' || s[i] == '\n' || s[i] == '\r') {
       s[i] = '/';
     }
   }
@@ -208,24 +248,17 @@ std::string sanitizeField(std::string s)
   return s;
 }
 
-// FUNGSI: isAllDigits   (flowchart: "Teks" -> "Semua angka?")
-// TUJUAN: memeriksa bahwa string tidak kosong dan seluruh karakternya angka.
-// Penjelasan: Fungsi ini menolak string kosong atau karakter selain digit.
-// CONTOH: 08123 -> true; 08-123 -> false.
-bool isAllDigits(std::string s)
-{
-  if (s == "")
-  {
+// Checks whether text is a nonempty sequence of digits.
+bool isAllDigits(std::string s) {
+  if (s == "") {
     return false;
   }
 
   int length = s.length();
-  for (int i = 0; i < length; i++)
-  {
+  for (int i = 0; i < length; i++) {
     bool isDigit = isdigit(s[i]);
 
-    if (!isDigit)
-    {
+    if (!isDigit) {
       return false;
     }
   }
@@ -233,37 +266,27 @@ bool isAllDigits(std::string s)
   return true;
 }
 
-// FUNGSI: splitLine   (flowchart: "Baris" -> "Field-field")
-// TUJUAN: memecah satu baris file ke array parts untuk modul storage.
-// Penjelasan: Fungsi ini memecah satu baris menjadi field berdasarkan delimiter hingga batas array.
-// CONTOH: "1|andi|08", '|', parts, 4 -> 3 dan parts berisi "1", "andi", "08".
+// Splits one delimited storage line into fields.
 int splitLine(std::string line, char delimiter, std::string parts[],
-              int maxParts)
-{
+              int maxParts) {
   std::string part = "";
   int amount = 0;
 
   int length = line.length();
-  for (int i = 0; i < length; i++)
-  {
-    if (line[i] == delimiter)
-    {
-      if (amount < maxParts)
-      {
+  for (int i = 0; i < length; i++) {
+    if (line[i] == delimiter) {
+      if (amount < maxParts) {
         parts[amount] = part;
         amount++;
       }
 
       part = "";
-    }
-    else
-    {
+    } else {
       part += line[i];
     }
   }
 
-  if (amount < maxParts)
-  {
+  if (amount < maxParts) {
     parts[amount] = part;
     amount++;
   }
@@ -271,26 +294,14 @@ int splitLine(std::string line, char delimiter, std::string parts[],
   return amount;
 }
 
-// Done
-// ============ date_utils ============
-
-// FUNGSI: isLeapYear   (flowchart: "Tahun" -> "Kabisat?")
-// TUJUAN: menentukan apakah suatu tahun adalah tahun kabisat.
-// Penjelasan: Fungsi ini menerapkan aturan habis dibagi 400 atau habis dibagi 4 tetapi bukan 100.
-// CONTOH: 2024 -> true; 2100 -> false.
-bool isLeapYear(int year)
-{
+// Checks whether a year is a leap year.
+bool isLeapYear(int year) {
   return (year % 400 == 0) || (year % 4 == 0 && year % 100 != 0);
 }
 
-// FUNGSI: daysInMonth   (flowchart: "Bulan+tahun" -> "Jumlah hari")
-// TUJUAN: mengembalikan jumlah hari dalam bulan tertentu.
-// Penjelasan: Fungsi ini membedakan bulan 30, 31, dan Februari berdasarkan tahun kabisat.
-// CONTOH: 2, 2024 -> 29.
-int daysInMonth(int month, int year)
-{
-  switch (month)
-  {
+// Returns the number of days in a month.
+int daysInMonth(int month, int year) {
+  switch (month) {
   case 1:
   case 3:
   case 5:
@@ -307,8 +318,7 @@ int daysInMonth(int month, int year)
     return 30;
 
   case 2:
-    if (isLeapYear(year))
-    {
+    if (isLeapYear(year)) {
       return 29;
     }
     return 28;
@@ -318,33 +328,24 @@ int daysInMonth(int month, int year)
   }
 }
 
-// FUNGSI: isValidDate   (flowchart: "Tanggal" -> "Format?" -> "Bulan/hari?")
-// TUJUAN: memeriksa format YYYY-MM-DD dan batas hari tiap bulan.
-// Penjelasan: Fungsi ini memvalidasi pemisah, digit, bulan, dan hari termasuk tahun kabisat.
-// CONTOH: 2025-02-30 -> false; 2025-02-28 -> true.
-bool isValidDate(std::string date)
-{
+// Validates a YYYY-MM-DD date.
+bool isValidDate(std::string date) {
   if (date.length() != 10)
     return false;
 
   if (date[4] != '-' || date[7] != '-')
     return false;
 
-  for (int i = 0; i < 10; i++)
-  {
-    if (i == 4 || i == 7)
-    {
+  for (int i = 0; i < 10; i++) {
+    if (i == 4 || i == 7) {
       continue;
     }
 
-    if (date[i] < '0' || date[i] > '9')
-    {
+    if (date[i] < '0' || date[i] > '9') {
       return false;
     }
   }
 
-  // convertion
-  // ascii '0' = 48
   int year = (date[0] - '0') * 1000 + (date[1] - '0') * 100 +
              (date[2] - '0') * 10 + (date[3] - '0');
   int month = (date[5] - '0') * 10 + (date[6] - '0');
@@ -356,21 +357,15 @@ bool isValidDate(std::string date)
   if (month < 1 || month > 12)
     return false;
 
-  if (day < 1 || day > daysInMonth(month, year))
-  {
+  if (day < 1 || day > daysInMonth(month, year)) {
     return false;
   }
 
   return true;
 }
 
-// FUNGSI: getTodayDate   (flowchart: "Jam komputer" -> "YYYY-MM-DD")
-// TUJUAN: mengembalikan tanggal lokal hari ini.
-// Penjelasan: Fungsi ini memakai waktu lokal komputer dan memformatnya sebagai YYYY-MM-DD.
-// CONTOH: pada 2025-08-17 -> 2025-08-17.
-std::string getTodayDate()
-{
-  // bagian ini sudah jadi karena memakai <ctime> yang belum diajarkan
+// Returns the current local date as YYYY-MM-DD.
+std::string getTodayDate() {
   time_t now = time(0);
   tm *local = localtime(&now);
   char result[11];
@@ -378,12 +373,8 @@ std::string getTodayDate()
   return std::string(result);
 }
 
-// FUNGSI: isFutureDate   (flowchart: "Tanggal valid?" -> "Bandingkan hari ini")
-// TUJUAN: menentukan apakah tanggal laporan lebih besar dari tanggal hari ini.
-// Penjelasan: Fungsi ini menolak tanggal tidak valid lalu membandingkan format YYYY-MM-DD dengan tanggal lokal.
-// CONTOH: besok -> true.
-bool isFutureDate(std::string date)
-{
+// Checks whether a valid date is after today.
+bool isFutureDate(std::string date) {
   if (isValidDate(date) == false)
     return false;
 
@@ -392,84 +383,72 @@ bool isFutureDate(std::string date)
   return date > today;
 }
 
-// Done
-// ============ id_utils ============
+// Checks whether an item date is at least 30 days old.
+bool isUnclaimedFor30Days(std::string date) {
+  if (!isValidDate(date)) {
+    return false;
+  }
 
-// FUNGSI: toDisplayNo   (flowchart: "Indeks" -> "+1" -> "Nomor layar")
-// TUJUAN: mengubah indeks array mulai 0 menjadi nomor layar mulai 1.
-// Penjelasan: Fungsi ini menambahkan satu pada indeks untuk ditampilkan kepada pengguna.
-// CONTOH: 0 -> 1.
+  tm foundTime = {};
+  foundTime.tm_year = (date[0] - '0') * 1000 + (date[1] - '0') * 100 +
+                      (date[2] - '0') * 10 + (date[3] - '0') - 1900;
+  foundTime.tm_mon = (date[5] - '0') * 10 + (date[6] - '0') - 1;
+  foundTime.tm_mday = (date[8] - '0') * 10 + (date[9] - '0');
+  foundTime.tm_hour = 12;
+
+  time_t foundAt = mktime(&foundTime);
+  if (foundAt == (time_t)-1) {
+    return false;
+  }
+
+  return difftime(time(0), foundAt) >= 30 * 24 * 60 * 60;
+}
+
+// Converts a zero-based index to a user-facing number.
 int toDisplayNo(int index) { return index + 1; }
 
-// FUNGSI: toIndex   (flowchart: "Nomor layar" -> "-1" -> "Indeks")
-// TUJUAN: mengubah nomor layar mulai 1 menjadi indeks array mulai 0.
-// Penjelasan: Fungsi ini mengurangi satu dari nomor yang dipilih pengguna.
-// CONTOH: 1 -> 0.
+// Converts a user-facing number to a zero-based index.
 int toIndex(int displayNo) { return displayNo - 1; }
 
-// Done
-// ============ input_helpers ============
-
-// FUNGSI: readLine   (flowchart: "Prompt" -> "getline" -> "Teks")
-// TUJUAN: menampilkan prompt lalu membaca satu baris lengkap.
-// Penjelasan: Fungsi ini memakai getline agar input boleh mengandung spasi.
-// CONTOH: prompt Nama, input Tas Biru -> Tas Biru.
-std::string readLine(std::string prompt)
-{
+// Prompts for and reads one full line of input.
+std::string readLine(std::string prompt) {
   cout << prompt;
   std::string result;
   getline(cin, result);
   return result;
 }
 
-// FUNGSI: readInt   (flowchart: "Input teks" -> "Angka valid?" -> "Dalam batas?")
-// TUJUAN: membaca bilangan dalam batas yang ditentukan.
-// Penjelasan: Fungsi ini mengulang input sampai berisi digit, tidak overflow, dan berada dalam batas.
-// CONTOH: input 2 dengan batas 1..3 -> 2.
-int readInt(std::string prompt, int minValue, int maxValue)
-{
-  while (true)
-  {
+// Reads a bounded integer and retries invalid input.
+int readInt(std::string prompt, int minValue, int maxValue) {
+  while (true) {
     std::string text = readLine(prompt);
 
-    // Memeriksa apakah input hanya terdiri dari angka
-    if (!isAllDigits(text))
-    {
+    if (!isAllDigits(text)) {
       cout << "Masukkan angka yang benar.\n";
       continue;
     }
 
-    // Mengubah teks menjadi bilangan bulat
-    else
-    {
+    else {
       int result = 0;
       bool overflow = false;
 
-      for (int i = 0; i < (int)text.length(); i++)
-      {
+      for (int i = 0; i < (int)text.length(); i++) {
         int digit = text[i] - '0';
 
-        // Cek batas integer sebelum perkalian dan penjumlahan
-        if (result > (INT_MAX - digit) / 10)
-        {
+        if (result > (INT_MAX - digit) / 10) {
           overflow = true;
           break;
         }
 
-        result = result  * 10 + digit;
-
+        result = result * 10 + digit;
       }
 
-      // Memeriksa apakah terjadi integer overflow
-      if (overflow)
-      {
+      if (overflow) {
         cout << "Angka terlalu besar. Silahkan masukkan angka kembali.\n";
         continue;
       }
 
-      // Memeriksa apakah angka berada dalam batas
-      if (result >= minValue && result <= maxValue)
-      {
+      if (result >= minValue && result <= maxValue) {
         return result;
       }
       cout << "Masukkan angka dari " << minValue << " sampai " << maxValue
@@ -478,60 +457,44 @@ int readInt(std::string prompt, int minValue, int maxValue)
   }
 }
 
-// FUNGSI: pauseScreen   (flowchart: "Tampil pesan" -> "Enter" -> "Lanjut")
-// TUJUAN: memberi pengguna waktu membaca hasil sebelum kembali ke menu.
-// Penjelasan: Fungsi ini menunggu pengguna menekan Enter melalui readLine.
-// CONTOH: setelah pesan berhasil, Enter kembali ke menu.
+// Waits for Enter before returning to a menu.
 void pauseScreen() { readLine("Tekan Enter untuk lanjut..."); }
 
-// FUNGSI: printHeader   (flowchart: "Judul" -> "Garis" -> "Judul")
-// TUJUAN: membuat judul layar konsisten pada setiap menu.
-// Penjelasan: Fungsi ini mencetak garis pemisah sebelum dan sesudah judul.
-// CONTOH: Menu Pengguna tampil di antara dua garis.
-void printHeader(std::string title)
-{
+// Prints a consistent terminal screen heading.
+void printHeader(std::string title) {
   std::cout << "\n==============================\n";
   std::cout << title << "\n";
   std::cout << "==============================\n";
 }
 
-// FUNGSI: loadAll   (flowchart: "Buka file" -> "Baris valid?" -> "Isi array")
-// TUJUAN: memuat pengguna, laporan, dan percobaan klaim dari file data.
-// Penjelasan: Fungsi ini mereset count lalu membaca setiap file yang tersedia ke array paralel.
-// CONTOH: users.txt tidak ada -> userCount tetap 0.
-void loadAll()
-{
-  // 1. Reset seluruh count ke 0 terlebih dahulu
+// Loads persisted users, lockers, items, reports, and claims.
+void loadAll() {
   userCount = 0;
   foundCount = 0;
   lostCount = 0;
   claimCount = 0;
 
-  // --- Memuat users.txt ---
   std::ifstream userFile("users.txt");
-  if (userFile.is_open())
-  {
+  if (userFile.is_open()) {
     std::string line;
-    while (getline(userFile, line))
-    {
-      if (userCount >= MAX_USERS)
-      {
+    while (getline(userFile, line)) {
+      if (userCount >= MAX_USERS) {
         break;
       }
-      std::string parts[5];
-      int partsCount = splitLine(line, '|', parts, 5);
-      if (partsCount == 5)
-      {
+      std::string parts[9];
+      int partsCount = splitLine(line, '|', parts, 9);
+      if (partsCount == 5 || partsCount == 8 || partsCount == 9) {
         userName[userCount] = parts[0];
         userPassword[userCount] = parts[1];
         userPhone[userCount] = parts[2];
+        userFullName[userCount] = partsCount >= 8 ? parts[5] : "";
+        userMajor[userCount] = partsCount >= 8 ? parts[6] : "";
+        userEmail[userCount] = partsCount >= 8 ? parts[7] : "";
+        userRole[userCount] = partsCount == 9 ? parts[8] : ROLE_STUDENT;
 
-        // Konversi string failed ke integer secara manual
         int failedVal = 0;
-        for (int i = 0; i < (int)parts[3].length(); i++)
-        {
-          if (parts[3][i] >= '0' && parts[3][i] <= '9')
-          {
+        for (int i = 0; i < (int)parts[3].length(); i++) {
+          if (parts[3][i] >= '0' && parts[3][i] <= '9') {
             failedVal = failedVal * 10 + (parts[3][i] - '0');
           }
         }
@@ -544,26 +507,28 @@ void loadAll()
     userFile.close();
   }
 
-  // --- Memuat found_items.txt ---
-  std::ifstream foundFile("found_items.txt");
-  if (foundFile.is_open())
-  {
+  std::ifstream lockerFile("lockers.txt");
+  if (lockerFile.is_open()) {
     std::string line;
-    while (getline(foundFile, line))
-    {
-      if (foundCount >= MAX_FOUND)
-      {
+    for (int i = 0; i < MAX_LOCKERS && getline(lockerFile, line); i++) {
+      lockerBroken[i] = (line == "1");
+    }
+    lockerFile.close();
+  }
+
+  std::ifstream foundFile("found_items.txt");
+  if (foundFile.is_open()) {
+    std::string line;
+    while (getline(foundFile, line)) {
+      if (foundCount >= MAX_FOUND) {
         break;
       }
-      std::string parts[8];
-      int partsCount = splitLine(line, '|', parts, 8);
-      if (partsCount == 8)
-      {
+      std::string parts[16];
+      int partsCount = splitLine(line, '|', parts, 16);
+      if (partsCount == 8 || partsCount == 12 || partsCount == 16) {
         int repIndex = 0;
-        for (int i = 0; i < (int)parts[0].length(); i++)
-        {
-          if (parts[0][i] >= '0' && parts[0][i] <= '9')
-          {
+        for (int i = 0; i < (int)parts[0].length(); i++) {
+          if (parts[0][i] >= '0' && parts[0][i] <= '9') {
             repIndex = repIndex * 10 + (parts[0][i] - '0');
           }
         }
@@ -576,6 +541,109 @@ void loadAll()
         foundDescription[foundCount] = parts[5];
         foundSecret[foundCount] = parts[6];
         foundStatus[foundCount] = parts[7];
+        foundPhoto[foundCount] = partsCount >= 12 ? parts[8] : "";
+        foundLocker[foundCount] = -1;
+        foundDepositCode[foundCount] = partsCount >= 12 ? parts[10] : "";
+        foundReservationExpiry[foundCount] = 0;
+        foundClaimant[foundCount] = -1;
+        foundPickupCode[foundCount] = partsCount == 16 ? parts[13] : "";
+        foundPickupExpiry[foundCount] = 0;
+        foundPickupFailed[foundCount] = 0;
+
+        if (partsCount >= 12) {
+          int locker = 0;
+          bool lockerValid = parts[9] != "";
+          int start = 0;
+          if (lockerValid && parts[9][0] == '-') {
+            start = 1;
+          }
+          if (start == (int)parts[9].length()) {
+            lockerValid = false;
+          }
+          for (int i = start; i < (int)parts[9].length(); i++) {
+            if (parts[9][i] < '0' || parts[9][i] > '9') {
+              lockerValid = false;
+              break;
+            }
+            locker = locker * 10 + (parts[9][i] - '0');
+            if (locker > MAX_LOCKERS) {
+              lockerValid = false;
+              break;
+            }
+          }
+          if (lockerValid && parts[9][0] == '-') {
+            locker = -locker;
+          }
+          if (lockerValid && locker >= -1 && locker < MAX_LOCKERS) {
+            foundLocker[foundCount] = locker;
+          }
+
+          long expiry = 0;
+          bool expiryValid = parts[11] != "";
+          for (int i = 0; i < (int)parts[11].length(); i++) {
+            if (parts[11][i] < '0' || parts[11][i] > '9') {
+              expiryValid = false;
+              break;
+            }
+            int digit = parts[11][i] - '0';
+            if (expiry > (LONG_MAX - digit) / 10) {
+              expiryValid = false;
+              break;
+            }
+            expiry = expiry * 10 + digit;
+          }
+          if (expiryValid) {
+            foundReservationExpiry[foundCount] = expiry;
+          }
+        }
+
+        if (partsCount == 16) {
+          if (isAllDigits(parts[12])) {
+            int claimant = 0;
+            bool claimantValid = true;
+            for (int i = 0; i < (int)parts[12].length(); i++) {
+              int digit = parts[12][i] - '0';
+              if (claimant > (MAX_USERS - digit) / 10) {
+                claimantValid = false;
+                break;
+              }
+              claimant = claimant * 10 + digit;
+            }
+            if (claimantValid && claimant < MAX_USERS) {
+              foundClaimant[foundCount] = claimant;
+            }
+          }
+
+          long pickupExpiry = 0;
+          bool pickupExpiryValid = isAllDigits(parts[14]);
+          for (int i = 0; i < (int)parts[14].length(); i++) {
+            int digit = parts[14][i] - '0';
+            if (pickupExpiry > (LONG_MAX - digit) / 10) {
+              pickupExpiryValid = false;
+              break;
+            }
+            pickupExpiry = pickupExpiry * 10 + digit;
+          }
+          if (pickupExpiryValid) {
+            foundPickupExpiry[foundCount] = pickupExpiry;
+          }
+
+          if (isAllDigits(parts[15])) {
+            int failed = 0;
+            bool failedValid = true;
+            for (int i = 0; i < (int)parts[15].length(); i++) {
+              int digit = parts[15][i] - '0';
+              if (failed > (MAX_CLAIM_ATTEMPTS - digit) / 10) {
+                failedValid = false;
+                break;
+              }
+              failed = failed * 10 + digit;
+            }
+            if (failedValid && failed <= MAX_CLAIM_ATTEMPTS) {
+              foundPickupFailed[foundCount] = failed;
+            }
+          }
+        }
 
         foundCount++;
       }
@@ -583,26 +651,19 @@ void loadAll()
     foundFile.close();
   }
 
-  // --- Memuat lost_reports.txt ---
   std::ifstream lostFile("lost_reports.txt");
-  if (lostFile.is_open())
-  {
+  if (lostFile.is_open()) {
     std::string line;
-    while (getline(lostFile, line))
-    {
-      if (lostCount >= MAX_LOST)
-      {
+    while (getline(lostFile, line)) {
+      if (lostCount >= MAX_LOST) {
         break;
       }
       std::string parts[6];
       int partsCount = splitLine(line, '|', parts, 6);
-      if (partsCount == 6)
-      {
+      if (partsCount == 6) {
         int repIndex = 0;
-        for (int i = 0; i < (int)parts[0].length(); i++)
-        {
-          if (parts[0][i] >= '0' && parts[0][i] <= '9')
-          {
+        for (int i = 0; i < (int)parts[0].length(); i++) {
+          if (parts[0][i] >= '0' && parts[0][i] <= '9') {
             repIndex = repIndex * 10 + (parts[0][i] - '0');
           }
         }
@@ -620,21 +681,16 @@ void loadAll()
     lostFile.close();
   }
 
-  // --- Memuat claim_attempts.txt / claims.txt ---
   std::ifstream claimFile("claims.txt");
-  if (claimFile.is_open())
-  {
+  if (claimFile.is_open()) {
     std::string line;
-    while (getline(claimFile, line))
-    {
-      if (claimCount >= MAX_CLAIMS)
-      {
+    while (getline(claimFile, line)) {
+      if (claimCount >= MAX_CLAIMS) {
         break;
       }
       std::string parts[3];
       int partsCount = splitLine(line, '|', parts, 3);
-      if (partsCount == 3)
-      {
+      if (partsCount == 3) {
         int cItem = 0, cUser = 0, cFailed = 0;
 
         for (int i = 0; i < (int)parts[0].length(); i++)
@@ -658,52 +714,75 @@ void loadAll()
   }
 }
 
-// PEMILIK TODO: Muflih
-// FUNGSI: saveAll   (flowchart: "Array" -> "Tulis tiap record" -> "Tutup file")
-// TUJUAN: menyimpan seluruh data saat layar UI berhasil mengubah data.
-// TODO:
-//  [ ] 1. Buka tiap file output dan loop dari 0 sampai count terkait.
-//  [ ] 2. Tulis satu record per baris dengan pemisah '|', mengikuti urutan yang tertulis di data-model.md.
-//  [ ] 3. Tulis bool locked sebagai 0 atau 1.
-//  [ ] 4. Pastikan teks sudah sanitizeField sebelum masuk array atau sebelum ditulis.
-//  [ ] 5. Tutup file setelah selesai; fungsi ini tidak boleh cout/cin.
-// CONTOH: user indeks 0 menjadi "andi|rahasia|08123|0|0".
-// HATI-HATI: jangan menulis foundSecret ke layar, tetapi tetap wajib ditulis ke found_items.txt untuk data klaim.
-// SELESAI JIKA: [ ] M-STORAGE-2 lulus.
-// JANGAN ubah nama, parameter, atau tipe return fungsi ini tanpa lapor semua pemilik modul.
-void saveAll()
-{
-  // Penyimpanan file bersifat opsional; tidak ada data yang berubah pada stub ini.
+// Persists users, lockers, items, reports, and claims.
+void saveAll() {
   std::ofstream userFile("users.txt");
-  if (userFile.is_open())
-  {
-    for (int i = 0; i < userCount; i++)
-    {
+  if (userFile.is_open()) {
+    for (int i = 0; i < userCount; i++) {
       userFile << sanitizeField(userName[i]) << "|"
                << sanitizeField(userPassword[i]) << "|"
-               << sanitizeField(userPhone[i]) << "|"
-               << userFailed[i] << "|"
-               << (userLocked[i] ? 1 : 0) << "\n";
+               << sanitizeField(userPhone[i]) << "|" << userFailed[i] << "|"
+               << (userLocked[i] ? 1 : 0) << "|"
+               << sanitizeField(userFullName[i]) << "|"
+               << sanitizeField(userMajor[i]) << "|"
+               << sanitizeField(userEmail[i]) << "|"
+               << sanitizeField(userRole[i]) << "\n";
     }
     userFile.close();
   }
+
+  std::ofstream foundFile("found_items.txt");
+  if (foundFile.is_open()) {
+    for (int i = 0; i < foundCount; i++) {
+      foundFile << foundReporter[i] << "|" << sanitizeField(foundName[i]) << "|"
+                << sanitizeField(foundCategory[i]) << "|"
+                << sanitizeField(foundLocation[i]) << "|" << foundDate[i] << "|"
+                << sanitizeField(foundDescription[i]) << "|"
+                << sanitizeField(foundSecret[i]) << "|" << foundStatus[i] << "|"
+                << sanitizeField(foundPhoto[i]) << "|" << foundLocker[i] << "|"
+                << sanitizeField(foundDepositCode[i]) << "|"
+                << foundReservationExpiry[i] << "|" << foundClaimant[i] << "|"
+                << sanitizeField(foundPickupCode[i]) << "|"
+                << foundPickupExpiry[i] << "|" << foundPickupFailed[i] << "\n";
+    }
+    foundFile.close();
+  }
+
+  std::ofstream lockerFile("lockers.txt");
+  if (lockerFile.is_open()) {
+    for (int i = 0; i < MAX_LOCKERS; i++) {
+      lockerFile << (lockerBroken[i] ? 1 : 0) << "\n";
+    }
+    lockerFile.close();
+  }
+
+  std::ofstream lostFile("lost_reports.txt");
+  if (lostFile.is_open()) {
+    for (int i = 0; i < lostCount; i++) {
+      lostFile << lostReporter[i] << "|" << sanitizeField(lostName[i]) << "|"
+               << sanitizeField(lostCategory[i]) << "|"
+               << sanitizeField(lostLocation[i]) << "|" << lostDate[i] << "|"
+               << sanitizeField(lostDescription[i]) << "\n";
+    }
+    lostFile.close();
+  }
+
+  std::ofstream claimFile("claims.txt");
+  if (claimFile.is_open()) {
+    for (int i = 0; i < claimCount; i++) {
+      claimFile << claimItem[i] << "|" << claimUser[i] << "|" << claimFailed[i]
+                << "\n";
+    }
+    claimFile.close();
+  }
 }
 
-// Done
-// ============ auth ============
-
-// FUNGSI: findUserByUsername   (flowchart: "Username" -> "Loop pengguna" -> "Indeks/-1")
-// TUJUAN: mencari indeks pengguna tanpa membedakan huruf besar dan kecil.
-// Penjelasan: Fungsi ini menormalkan username lalu membandingkannya dengan setiap pengguna.
-// CONTOH: data Andi, input andi -> 0.
-int findUserByUsername(std::string username)
-{
+// Finds a user index by login ID without case sensitivity.
+int findUserByUsername(std::string username) {
   username = toLower(username);
 
-  for (int i = 0; i < userCount; i++)
-  {
-    if (toLower(userName[i]) == username)
-    {
+  for (int i = 0; i < userCount; i++) {
+    if (toLower(userName[i]) == username) {
       return i;
     }
   }
@@ -711,21 +790,15 @@ int findUserByUsername(std::string username)
   return -1;
 }
 
-// FUNGSI: registerUser   (flowchart: "Input daftar" -> "Valid?" -> "Simpan array")
-// TUJUAN: memvalidasi lalu menambahkan satu pengguna baru.
-// Penjelasan: Fungsi ini memeriksa data pendaftaran, kapasitas, dan duplikasi sebelum mengisi array pengguna.
-// CONTOH: andi, rahasia, 08123 -> REG_OK.
+// Validates and stores a base user account.
 int registerUser(std::string username, std::string password,
-                 std::string phone)
-{
+                 std::string phone) {
   if (username == "" || password == "" || phone == "")
     return REG_EMPTY_FIELD;
 
   int length = username.length();
-  for (int i = 0; i < length; i++)
-  {
-    if (username[i] == ' ')
-    {
+  for (int i = 0; i < length; i++) {
+    if (username[i] == ' ') {
       return REG_USERNAME_HAS_SPACE;
     }
   }
@@ -753,12 +826,37 @@ int registerUser(std::string username, std::string password,
   return REG_OK;
 }
 
-// FUNGSI: loginUser   (flowchart: "Input login" -> "Valid?" -> "Gagal 3x?")
-// TUJUAN: memeriksa kredensial dan mengunci akun setelah tiga kesalahan.
-// Penjelasan: Fungsi ini mengatur hitungan gagal, status kunci, dan mengembalikan indeks atau kode login.
-// CONTOH: password salah tiga kali -> LOGIN_LOCKED.
-int loginUser(std::string username, std::string password)
-{
+// Registers a student profile and its login account.
+int registerStudent(std::string nim, std::string fullName, std::string major,
+                    std::string email, std::string phone,
+                    std::string password) {
+  nim = trim(nim);
+  fullName = trim(fullName);
+  major = trim(major);
+  email = trim(email);
+  phone = trim(phone);
+
+  if (nim == "" || fullName == "" || major == "" || email == "" ||
+      phone == "" || password == "") {
+    return REG_EMPTY_FIELD;
+  }
+
+  int result = registerUser(nim, password, phone);
+  if (result != REG_OK) {
+    return result;
+  }
+
+  int userIndex = userCount - 1;
+  userFullName[userIndex] = sanitizeField(fullName);
+  userMajor[userIndex] = sanitizeField(major);
+  userEmail[userIndex] = sanitizeField(email);
+  userRole[userIndex] = ROLE_STUDENT;
+
+  return REG_OK;
+}
+
+// Authenticates a user and tracks failed login attempts.
+int loginUser(std::string username, std::string password) {
   int index = findUserByUsername(username);
   if (index == -1)
     return LOGIN_NOT_FOUND;
@@ -766,65 +864,44 @@ int loginUser(std::string username, std::string password)
   if (userLocked[index] == true)
     return LOGIN_LOCKED;
 
-  if (userPassword[index] == password)
-  {
+  if (userPassword[index] == password) {
     userFailed[index] = 0;
     return index;
-  }
-  else
-  {
+  } else {
     userFailed[index] += 1;
   }
 
-  if (userFailed[index] >= MAX_LOGIN_ATTEMPTS)
-  {
+  if (userFailed[index] >= MAX_LOGIN_ATTEMPTS) {
     userLocked[index] = true;
     return LOGIN_LOCKED;
-  }
-  else
-  {
+  } else {
     return LOGIN_WRONG_PASSWORD;
   }
 
   return LOGIN_NOT_FOUND;
 }
 
-// ============ [PEMILIK Haris, Muflih, dan Mudhofar] items ============
-
-// FUNGSI: addFoundItem   (flowchart: "Input barang" -> "Valid?" -> "Simpan")
-// TUJUAN: memvalidasi dan menambah satu laporan barang temuan.
-// Penjelasan: Fungsi ini memeriksa data dan tanggal, membersihkan teks, lalu mengisi array temuan.
-// CONTOH: tanggal masa depan -> ITEM_FUTURE_DATE.
+// Validates and adds a found-item record.
 int addFoundItem(int reporterIndex, std::string name, std::string category,
                  std::string location, string dateFound,
-                 std::string description, std::string secretDetail)
-{
-  // 1. Cek field wajib tidak boleh kosong (description opsional)
+                 std::string description, std::string secretDetail) {
   if (trim(name) == "" || trim(category) == "" || trim(location) == "" ||
-      trim(dateFound) == "" || trim(secretDetail) == "")
-  {
+      trim(dateFound) == "" || trim(secretDetail) == "") {
     return ITEM_EMPTY_FIELD;
   }
 
-  // 2. Cek apakah format tanggal valid
-  if (!isValidDate(dateFound))
-  {
+  if (!isValidDate(dateFound)) {
     return ITEM_INVALID_DATE;
   }
 
-  // 3. Cek apakah tanggal berada di masa depan
-  if (isFutureDate(dateFound))
-  {
+  if (isFutureDate(dateFound)) {
     return ITEM_FUTURE_DATE;
   }
 
-  // 4. Cek apakah kapasitas penyimpanan sudah penuh
-  if (foundCount >= MAX_FOUND)
-  {
+  if (foundCount >= MAX_FOUND) {
     return ITEM_FULL;
   }
 
-  // 5. Isi semua array found pada indeks foundCount, terapkan sanitizeField pada teks
   foundReporter[foundCount] = reporterIndex;
   foundName[foundCount] = sanitizeField(name);
   foundCategory[foundCount] = sanitizeField(category);
@@ -833,44 +910,196 @@ int addFoundItem(int reporterIndex, std::string name, std::string category,
   foundDescription[foundCount] = sanitizeField(description);
   foundSecret[foundCount] = sanitizeField(secretDetail);
   foundStatus[foundCount] = STATUS_AVAILABLE;
+  foundPhoto[foundCount] = "";
+  foundLocker[foundCount] = -1;
+  foundDepositCode[foundCount] = "";
+  foundReservationExpiry[foundCount] = 0;
+  foundClaimant[foundCount] = -1;
+  foundPickupCode[foundCount] = "";
+  foundPickupExpiry[foundCount] = 0;
+  foundPickupFailed[foundCount] = 0;
 
-  // 6. Naikkan foundCount setelah semua pasangan terisi, lalu return ITEM_OK
   foundCount++;
   return ITEM_OK;
 }
 
-// FUNGSI: addLostReport   (flowchart: "Input hilang" -> "Valid?" -> "Simpan")
-// TUJUAN: memvalidasi dan menambah satu laporan kehilangan.
-// Penjelasan: Fungsi ini memeriksa data dan tanggal, membersihkan teks, lalu mengisi array kehilangan.
-// CONTOH: lokasi kosong -> ITEM_EMPTY_FIELD.
-int addLostReport(int reporterIndex, std::string name, std::string category,
-                  std::string location, string dateLost,
-                  std::string description)
-{
-  // 1. Cek field wajib tidak boleh kosong (description boleh kosong)
-  if (trim(name) == "" || trim(category) == "" || trim(location) == "" || trim(dateLost) == "")
-  {
+// Formats a locker index as an A1-C3 label.
+std::string lockerLabel(int lockerIndex) {
+  std::string label = "";
+  label += (char)('A' + lockerIndex / 3);
+  label += (char)('1' + lockerIndex % 3);
+  return label;
+}
+
+// Cancels expired deposit reservations and frees their lockers.
+void releaseExpiredDepositReservations() {
+  long now = (long)time(0);
+
+  for (int i = 0; i < foundCount; i++) {
+    if (foundStatus[i] == STATUS_DEPOSIT_PENDING &&
+        foundReservationExpiry[i] <= now) {
+      foundStatus[i] = STATUS_DEPOSIT_CANCELLED;
+      foundLocker[i] = -1;
+      foundDepositCode[i] = "";
+      foundReservationExpiry[i] = 0;
+    }
+  }
+}
+
+// Finds the first usable unoccupied locker.
+int findAvailableLocker() {
+  releaseExpiredDepositReservations();
+
+  for (int locker = 0; locker < MAX_LOCKERS; locker++) {
+    if (lockerBroken[locker]) {
+      continue;
+    }
+    bool occupied = false;
+
+    for (int i = 0; i < foundCount; i++) {
+      if (foundLocker[i] == locker &&
+          (foundStatus[i] == STATUS_DEPOSIT_PENDING ||
+           foundStatus[i] == STATUS_AVAILABLE ||
+           foundStatus[i] == STATUS_NEEDS_VERIFICATION)) {
+        occupied = true;
+        break;
+      }
+    }
+
+    if (!occupied) {
+      return locker;
+    }
+  }
+
+  return -1;
+}
+
+// Generates an unused six-digit deposit code.
+std::string makeDepositCode() {
+  int code = (int)(time(0) % 900000) + 100000;
+
+  for (int attempt = 0; attempt < 900000; attempt++) {
+    bool used = false;
+    std::string candidate = std::to_string(code);
+
+    for (int i = 0; i < foundCount; i++) {
+      if (foundStatus[i] == STATUS_DEPOSIT_PENDING &&
+          foundDepositCode[i] == candidate) {
+        used = true;
+        break;
+      }
+    }
+
+    if (!used) {
+      return candidate;
+    }
+
+    code++;
+    if (code > 999999) {
+      code = 100000;
+    }
+  }
+
+  return "";
+}
+
+// Generates an unused six-digit pickup code.
+std::string makePickupCode() {
+  int code = (int)(time(0) % 900000) + 100000;
+
+  for (int attempt = 0; attempt < 900000; attempt++) {
+    bool used = false;
+    std::string candidate = std::to_string(code);
+
+    for (int i = 0; i < foundCount; i++) {
+      if (foundStatus[i] == STATUS_CLAIM_PENDING &&
+          foundPickupCode[i] == candidate) {
+        used = true;
+        break;
+      }
+    }
+
+    if (!used) {
+      return candidate;
+    }
+
+    code++;
+    if (code > 999999) {
+      code = 100000;
+    }
+  }
+
+  return "";
+}
+
+// Clears pickup claimant, code, expiry, and failure data.
+void clearPickupDetails(int itemIndex) {
+  foundClaimant[itemIndex] = -1;
+  foundPickupCode[itemIndex] = "";
+  foundPickupExpiry[itemIndex] = 0;
+  foundPickupFailed[itemIndex] = 0;
+}
+
+// Creates a pending found-item deposit reservation.
+int reserveFoundItem(int reporterIndex, std::string name, std::string category,
+                     std::string location, std::string dateFound,
+                     std::string description, std::string secretDetail,
+                     std::string photo) {
+  if (trim(photo) == "") {
     return ITEM_EMPTY_FIELD;
   }
 
-  // 2. Jika tanggal tidak valid -> ITEM_INVALID_DATE; jika masa depan -> ITEM_FUTURE_DATE
-  if (!isValidDate(dateLost))
-  {
+  int result = addFoundItem(reporterIndex, name, category, location, dateFound,
+                            description, secretDetail);
+  if (result != ITEM_OK) {
+    return result;
+  }
+
+  int locker = findAvailableLocker();
+  if (locker == -1) {
+    foundCount--;
+    return ITEM_LOCKER_FULL;
+  }
+
+  int itemIndex = foundCount - 1;
+  foundPhoto[itemIndex] = sanitizeField(photo);
+  foundLocker[itemIndex] = locker;
+  foundDepositCode[itemIndex] = makeDepositCode();
+  foundReservationExpiry[itemIndex] = (long)time(0) + 10 * 60;
+  foundStatus[itemIndex] = STATUS_DEPOSIT_PENDING;
+
+  return ITEM_OK;
+}
+
+// Cancels a deposit reservation and frees its locker.
+void cancelDepositReservation(int itemIndex) {
+  foundStatus[itemIndex] = STATUS_DEPOSIT_CANCELLED;
+  foundLocker[itemIndex] = -1;
+  foundDepositCode[itemIndex] = "";
+  foundReservationExpiry[itemIndex] = 0;
+}
+
+// Validates and adds a lost-item report.
+int addLostReport(int reporterIndex, std::string name, std::string category,
+                  std::string location, string dateLost,
+                  std::string description) {
+  if (trim(name) == "" || trim(category) == "" || trim(location) == "" ||
+      trim(dateLost) == "") {
+    return ITEM_EMPTY_FIELD;
+  }
+
+  if (!isValidDate(dateLost)) {
     return ITEM_INVALID_DATE;
   }
 
-  if (isFutureDate(dateLost))
-  {
+  if (isFutureDate(dateLost)) {
     return ITEM_FUTURE_DATE;
   }
 
-  // 3. Jika lostCount sudah MAX_LOST -> ITEM_FULL
-  if (lostCount >= MAX_LOST)
-  {
+  if (lostCount >= MAX_LOST) {
     return ITEM_FULL;
   }
 
-  // 4. Isi seluruh array lost pada indeks lostCount dengan sanitizeField untuk semua teks
   lostReporter[lostCount] = reporterIndex;
   lostName[lostCount] = sanitizeField(name);
   lostCategory[lostCount] = sanitizeField(category);
@@ -878,55 +1107,35 @@ int addLostReport(int reporterIndex, std::string name, std::string category,
   lostDate[lostCount] = dateLost;
   lostDescription[lostCount] = sanitizeField(description);
 
-  // 5. Naikkan lostCount lalu return ITEM_OK
   lostCount++;
   return ITEM_OK;
 }
 
-// FUNGSI: searchAvailableItems   (flowchart: "Filter" -> "Loop temuan" -> "searchResult")
-// TUJUAN: mengisi hasil pencarian dengan barang berstatus tersedia.
-// Penjelasan: Fungsi ini menerapkan filter nama, deskripsi, kategori, dan lokasi pada barang temuan.
-// CONTOH: keyword tas menemukan Tas Biru.
+// Finds public items matching the supplied filters.
 int searchAvailableItems(std::string keyword, std::string category,
-                         std::string location)
-{
+                         std::string location) {
 
-  // Reset jumlah hasil pencarian
   searchResultCount = 0;
 
-  // Periksa seluruh data barang temuan
-  for (int i = 0; i < foundCount; i++)
-  {
+  for (int i = 0; i < foundCount; i++) {
 
-    // lewati barang yang tidak tersedia
-    if (foundStatus[i] != STATUS_AVAILABLE)
-    {
+    if (foundStatus[i] != STATUS_AVAILABLE) {
       continue;
     }
 
-    // Periksa keyword pada nama atau deskripsi barang
-    if (keyword != "" &&
-        !containsIgnoreCase(foundName[i], keyword) &&
-        !containsIgnoreCase(foundDescription[i], keyword))
-    {
+    if (keyword != "" && !containsIgnoreCase(foundName[i], keyword) &&
+        !containsIgnoreCase(foundDescription[i], keyword)) {
       continue;
     }
 
-    // Periksa kategori barang
-    if (category != "" &&
-        !containsIgnoreCase(foundCategory[i], category))
-    {
+    if (category != "" && !containsIgnoreCase(foundCategory[i], category)) {
       continue;
     }
 
-    // Periksa lokasi barang
-    if (location != "" &&
-        !containsIgnoreCase(foundLocation[i], location))
-    {
+    if (location != "" && !containsIgnoreCase(foundLocation[i], location)) {
       continue;
     }
 
-    // Simpan indeks asli barang ke hasil pencarian
     searchResult[searchResultCount] = i;
     searchResultCount++;
   }
@@ -934,51 +1143,24 @@ int searchAvailableItems(std::string keyword, std::string category,
   return searchResultCount;
 }
 
-// PEMILIK TODO: Muflih
-// FUNGSI: listItemsByReporter   (flowchart: "User" -> "Loop temuan" ->
-// "searchResult") TUJUAN: mengisi hasil bersama dengan semua barang temuan
-// milik seorang pengguna.
-// TODO:
-//  [ ] 1. Set searchResultCount=0 dan loop semua found item.
-//  [ ] 2. Jika foundReporter[i] sama dengan reporterIndex, simpan i ke
-//  searchResult dan tambah count. [ ] 3. Return searchResultCount setelah loop.
-// CONTOH: pengguna indeks 0 dengan dua temuan -> return 2.
-// HATI-HATI: yang disimpan adalah indeks asli barang, bukan nomor tampilan
-// indeks+1. SELESAI JIKA: [ ] M-ITEM-6 lulus. JANGAN ubah nama, parameter, atau
-// tipe return fungsi ini tanpa lapor semua pemilik modul.
-int listItemsByReporter(int reporterIndex)
-{
-  std::ofstream foundFile("found_items.txt");
-  if (foundFile.is_open())
-  {
-    for (int i = 0; i < foundCount; i++)
-    {
-      foundFile << foundReporter[i] << "|"
-                << sanitizeField(foundName[i]) << "|"
-                << sanitizeField(foundCategory[i]) << "|"
-                << sanitizeField(foundLocation[i]) << "|"
-                << foundDate[i] << "|"
-                << sanitizeField(foundDescription[i]) << "|"
-                << sanitizeField(foundSecret[i]) << "|"
-                << foundStatus[i] << "\n";
-    }
-    foundFile.close();
-  }
+// Lists found items reported by one user.
+int listItemsByReporter(int reporterIndex) {
   searchResultCount = 0;
-  return 0;
+
+  for (int i = 0; i < foundCount; i++) {
+    if (foundReporter[i] == reporterIndex) {
+      searchResult[searchResultCount] = i;
+      searchResultCount++;
+    }
+  }
+
+  return searchResultCount;
 }
 
-// FUNGSI: getFailedClaimCount   (flowchart: "Item+user" -> "Loop klaim" -> "Jumlah")
-// TUJUAN: mengambil jumlah jawaban klaim salah untuk pasangan item dan pengguna.
-// Penjelasan: Fungsi ini mencari catatan klaim yang cocok dan mengembalikan 0 bila belum ada.
-// CONTOH: belum pernah mencoba klaim -> 0.
-int getFailedClaimCount(int itemIndex, int userIndex)
-{
-  for (int i = 0; i < claimCount; i++)
-  {
-    if (claimItem[i] == itemIndex &&
-        claimUser[i] == userIndex)
-    {
+// Returns prior failed claim attempts for an item and user.
+int getFailedClaimCount(int itemIndex, int userIndex) {
+  for (int i = 0; i < claimCount; i++) {
+    if (claimItem[i] == itemIndex && claimUser[i] == userIndex) {
       return claimFailed[i];
     }
   }
@@ -986,346 +1168,384 @@ int getFailedClaimCount(int itemIndex, int userIndex)
   return 0;
 }
 
-// FUNGSI: getFinderContact   (flowchart: "Item" -> "Reporter" -> "Kontak")
-// TUJUAN: membuat teks kontak penemu barang.
-// Penjelasan: Fungsi ini mengambil reporter barang lalu menggabungkan username dan nomor teleponnya.
-// CONTOH: penemu andi dengan 08123 -> andi - 08123.
-std::string getFinderContact(int itemIndex)
-{
+// Builds the finder contact text for an item.
+std::string getFinderContact(int itemIndex) {
   int reporterIndex = foundReporter[itemIndex];
 
   return userName[reporterIndex] + " - " + userPhone[reporterIndex];
 }
 
-// FUNGSI: submitClaim   (flowchart: "Pilih item" -> "Boleh klaim?" -> "Detail benar?")
-// TUJUAN: menyetujui klaim benar atau mencatat jawaban salah.
-// Penjelasan: Fungsi ini memeriksa kelayakan klaim, membandingkan detail rahasia, lalu memperbarui status atau percobaan.
-// CONTOH: jawaban salah ketiga -> CLAIM_WRONG_DETAIL.
-int submitClaim(int claimantIndex, int itemIndex, std::string secretAnswer)
-{
+// Validates a claim and starts pickup when the secret matches.
+int submitClaim(int claimantIndex, int itemIndex, std::string secretAnswer) {
 
-  // Periksa apakah indeks barang falid
-  if (itemIndex < 0 || itemIndex >= foundCount)
-  {
+  if (itemIndex < 0 || itemIndex >= foundCount) {
     return CLAIM_ITEM_NOT_FOUND;
   }
 
-  // Periksa apakah barang masih tersedia
-  if (foundStatus[itemIndex] != STATUS_AVAILABLE)
-  {
+  if (foundStatus[itemIndex] != STATUS_AVAILABLE) {
     return CLAIM_NOT_AVAILABLE;
   }
 
-  // Pengguna tidak boleh mengklaim barang temuannya sendiri
-  if (foundReporter[itemIndex] == claimantIndex)
-  {
+  if (foundReporter[itemIndex] == claimantIndex) {
     return CLAIM_OWN_ITEM;
   }
 
-  // Periksa batas percobaan klaim
-  if (getFailedClaimCount(itemIndex, claimantIndex) >= MAX_CLAIM_ATTEMPTS)
-  {
+  if (getFailedClaimCount(itemIndex, claimantIndex) >= MAX_CLAIM_ATTEMPTS) {
     return CLAIM_TOO_MANY_ATTEMPTS;
   }
 
-  // Bandingkan jawaban dengan detail rahasia
-  if (toLower(trim(secretAnswer)) ==
-      toLower(trim(foundSecret[itemIndex])))
-  {
-
-    foundStatus[itemIndex] = STATUS_RETURNED;
+  if (toLower(trim(secretAnswer)) == toLower(trim(foundSecret[itemIndex]))) {
+    foundStatus[itemIndex] = STATUS_CLAIM_PENDING;
+    foundClaimant[itemIndex] = claimantIndex;
+    foundPickupCode[itemIndex] = makePickupCode();
+    foundPickupExpiry[itemIndex] = (long)time(0) + 24 * 60 * 60;
+    foundPickupFailed[itemIndex] = 0;
 
     return CLAIM_APPROVED;
   }
 
-  // Jika jawaban salah, cari data percobaan klaim sebelumnya
-  for (int i = 0; i < claimCount; i++)
-  {
-    if (claimItem[i] == itemIndex &&
-        claimUser[i] == claimantIndex)
-    {
+  for (int i = 0; i < claimCount; i++) {
+    if (claimItem[i] == itemIndex && claimUser[i] == claimantIndex) {
 
       claimFailed[i]++;
+      if (claimFailed[i] >= MAX_CLAIM_ATTEMPTS) {
+        return CLAIM_TOO_MANY_ATTEMPTS;
+      }
       return CLAIM_WRONG_DETAIL;
     }
   }
 
-  // Jika belum ada data klaim dan penyimpana penuh
-  if (claimCount >= MAX_CLAIMS)
-  {
+  if (claimCount >= MAX_CLAIMS) {
     return CLAIM_STORAGE_FULL;
   }
 
-  // Buat data percobaan klaim baru
   claimItem[claimCount] = itemIndex;
   claimUser[claimCount] = claimantIndex;
   claimFailed[claimCount] = 1;
 
   claimCount++;
 
+  if (claimFailed[claimCount - 1] >= MAX_CLAIM_ATTEMPTS) {
+    return CLAIM_TOO_MANY_ATTEMPTS;
+  }
   return CLAIM_WRONG_DETAIL;
 }
 
-// ============ [PEMILIK Muflih] auth_screen ============
+// Validates a claimant pickup code and tracks failures.
+int submitPickupCode(int claimantIndex, int itemIndex, std::string code) {
+  if (foundStatus[itemIndex] != STATUS_CLAIM_PENDING ||
+      foundClaimant[itemIndex] != claimantIndex) {
+    return PICKUP_LOCKED;
+  }
 
-// FUNGSI: showRegisterScreen   (flowchart: "Input daftar" -> "registerUser" -> "Pesan")
-// TUJUAN: meminta data pendaftaran, menampilkan pesan hasil, dan menyimpan jika sukses.
-// TODO:
-//  [ ] 1. Tampilkan header lalu ambil username, password, dan nomor dengan readLine.
-//  [ ] 2. Panggil registerUser dan simpan kode hasilnya.
-//  [ ] 3. Dengan if/else, tampilkan pesan Indonesia untuk setiap REG_*; jangan memakai switch.
-//  [ ] 4. Jika kode REG_OK, panggil saveAll tepat sekali dan tampilkan pesan berhasil.
-//  [ ] 5. Panggil pauseScreen sebelum kembali ke main.
-// CONTOH: password lima karakter -> pesan password minimal 6 karakter dan tidak memanggil saveAll.
-// HATI-HATI: layar menyimpan input dengan readLine; modul auth tidak boleh memakai cout/cin/file.
-// SELESAI JIKA: [ ] M-AUTH-1 dan M-AUTH-2 lulus.
-// JANGAN ubah nama, parameter, atau tipe return fungsi ini tanpa lapor semua pemilik modul.
-void showRegisterScreen()
-{
+  if ((long)time(0) > foundPickupExpiry[itemIndex]) {
+    foundStatus[itemIndex] = STATUS_AVAILABLE;
+    clearPickupDetails(itemIndex);
+    return PICKUP_EXPIRED;
+  }
+
+  if (trim(code) != foundPickupCode[itemIndex]) {
+    foundPickupFailed[itemIndex]++;
+    if (foundPickupFailed[itemIndex] >= MAX_CLAIM_ATTEMPTS) {
+      foundStatus[itemIndex] = STATUS_PICKUP_LOCKED;
+      foundPickupCode[itemIndex] = "";
+      foundPickupExpiry[itemIndex] = 0;
+      return PICKUP_LOCKED;
+    }
+    return PICKUP_WRONG_CODE;
+  }
+
+  return PICKUP_OK;
+}
+
+// Runs the terminal pickup and locker-sensor simulation.
+void showPickupFlow(int claimantIndex, int itemIndex) {
+  while (true) {
+    std::string code = trim(readLine("Masukkan kode ambil di loker: "));
+    int result = submitPickupCode(claimantIndex, itemIndex, code);
+
+    if (result == PICKUP_EXPIRED) {
+      saveAll();
+      std::cout << "Kode ambil kedaluwarsa; barang kembali tersedia.\n";
+      return;
+    }
+    if (result == PICKUP_LOCKED) {
+      saveAll();
+      std::cout
+          << "Kode ambil terkunci; admin telah diberi penanda verifikasi.\n";
+      return;
+    }
+    if (result == PICKUP_WRONG_CODE) {
+      std::cout << "Kode salah. Percobaan tersisa: "
+                << MAX_CLAIM_ATTEMPTS - foundPickupFailed[itemIndex] << "\n";
+      saveAll();
+      continue;
+    }
+
+    std::cout << "Pintu loker terbuka.\n";
+    while (true) {
+      int sensor = readInt("\nSimulasi loker:\n"
+                           "1. Barang diambil, pintu tertutup, sensor kosong\n"
+                           "2. Belum selesai\n"
+                           "3. Simulasikan batas waktu 2 menit\n"
+                           "Pilih: ",
+                           1, 3);
+
+      if (sensor == 1) {
+        foundStatus[itemIndex] = STATUS_PICKED_UP;
+        foundLocker[itemIndex] = -1;
+        clearPickupDetails(itemIndex);
+        saveAll();
+        std::cout << "Barang sudah diambil; loker kembali kosong.\n";
+        return;
+      }
+      if (sensor == 3) {
+        foundStatus[itemIndex] = STATUS_NEEDS_VERIFICATION;
+        foundPickupCode[itemIndex] = "";
+        foundPickupExpiry[itemIndex] = 0;
+        saveAll();
+        std::cout
+            << "Anomali tercatat; loker dikunci untuk verifikasi admin.\n";
+        return;
+      }
+    }
+  }
+}
+
+// Runs the terminal student registration screen.
+void showRegisterScreen() {
   printHeader("Register");
 
-  std::string username = trim(readLine("Username: "));
-  std::string password = readLine("Password (min 6 karakter): ");
+  std::string nim = trim(readLine("NIM: "));
+  std::string fullName = trim(readLine("Nama lengkap: "));
+  std::string major = trim(readLine("Jurusan: "));
+  std::string email = trim(readLine("Email: "));
   std::string phone = trim(readLine("Nomor telepon: "));
+  std::string password = readLine("Password (min 6 karakter): ");
 
-  int result = registerUser(username, password, phone);
+  int result = registerStudent(nim, fullName, major, email, phone, password);
 
-  if (result == REG_OK)
-  {
+  if (result == REG_OK) {
     std::cout << "Registrasi berhasil! Silakan login.\n";
     saveAll();
-  }
-  else if (result == REG_EMPTY_FIELD)
-  {
+  } else if (result == REG_EMPTY_FIELD) {
     std::cout << "Gagal: Semua kolom harus diisi.\n";
-  }
-  else if (result == REG_USERNAME_HAS_SPACE)
-  {
-    std::cout << "Gagal: Username tidak boleh mengandung spasi.\n";
-  }
-  else if (result == REG_DUPLICATE)
-  {
-    std::cout << "Gagal: Username sudah digunakan.\n";
-  }
-  else if (result == REG_PASSWORD_SHORT)
-  {
+  } else if (result == REG_USERNAME_HAS_SPACE) {
+    std::cout << "Gagal: NIM tidak boleh mengandung spasi.\n";
+  } else if (result == REG_DUPLICATE) {
+    std::cout << "Gagal: NIM sudah digunakan.\n";
+  } else if (result == REG_PASSWORD_SHORT) {
     std::cout << "Gagal: Password minimal " << MIN_PASSWORD_LENGTH
               << " karakter.\n";
-  }
-  else if (result == REG_PHONE_INVALID)
-  {
+  } else if (result == REG_PHONE_INVALID) {
     std::cout << "Gagal: Nomor telepon hanya boleh berisi angka.\n";
-  }
-  else if (result == REG_FULL)
-  {
+  } else if (result == REG_FULL) {
     std::cout << "Gagal: Kapasitas pengguna sudah penuh.\n";
-  }
-  else
-  {
+  } else {
     std::cout << "Gagal: Terjadi kesalahan yang tidak diketahui.\n";
   }
 
   pauseScreen();
-  // Stub layar: isi setelah registerUser selesai dikerjakan.
 }
 
-// PEMILIK TODO: Muflih
-// FUNGSI: showLoginScreen   (flowchart: "Input login" -> "loginUser" -> "Masuk/-1")
-// TUJUAN: meminta kredensial dan mengembalikan indeks pengguna bila login berhasil.
-// TODO:
-//  [ ] 1. Tampilkan header dan ambil username serta password melalui readLine.
-//  [ ] 2. Panggil loginUser(username, password).
-//  [ ] 3. Jika hasil >= 0, tampilkan selamat datang, panggil saveAll karena gagal login mungkin berubah, lalu return hasil.
-//  [ ] 4. Jika hasil LOGIN_NOT_FOUND, LOGIN_WRONG_PASSWORD, atau LOGIN_LOCKED, tampilkan pesan Indonesia dengan if/else, panggil saveAll bila failed/locked berubah, pauseScreen, lalu return -1.
-// CONTOH: username tidak ada -> pesan akun tidak ditemukan dan return -1.
-// HATI-HATI: indeks 0 sukses; selalu cek hasil >= 0, bukan if(hasil).
-// SELESAI JIKA: [ ] M-AUTH-3 dan M-AUTH-4 lulus.
-// JANGAN ubah nama, parameter, atau tipe return fungsi ini tanpa lapor semua pemilik modul.
-int showLoginScreen()
-{
-    printHeader("Login");
+// Runs the terminal login screen.
+int showLoginScreen() {
+  printHeader("Login");
 
-  std::string username = trim(readLine("Username: "));
+  std::string nim = trim(readLine("NIM (atau ID lama): "));
   std::string password = readLine("Password: ");
 
-  int result = loginUser(username, password);
+  int result = loginUser(nim, password);
 
-  if (result >= 0)
-  {
+  if (result >= 0) {
     std::cout << "Selamat datang, " << userName[result] << "!\n";
-    saveAll(); // failed count direset ke 0
+    saveAll();
     return result;
   }
 
-  if (result == LOGIN_NOT_FOUND)
-  {
+  if (result == LOGIN_NOT_FOUND) {
     std::cout << "Akun tidak ditemukan.\n";
-  }
-  else if (result == LOGIN_WRONG_PASSWORD)
-  {
+  } else if (result == LOGIN_WRONG_PASSWORD) {
     std::cout << "Password salah.\n";
-    saveAll(); // jumlah gagal berubah
-  }
-  else if (result == LOGIN_LOCKED)
-  {
+    saveAll();
+  } else if (result == LOGIN_LOCKED) {
     std::cout << "Akun terkunci karena terlalu banyak percobaan gagal.\n";
-    saveAll(); // status locked berubah
-  }
-  else
-  {
+    saveAll();
+  } else {
     std::cout << "Terjadi kesalahan yang tidak diketahui.\n";
   }
 
   pauseScreen();
   return -1;
-  // Stub aman: -1 berarti kembali ke menu tamu.
-
 }
 
-// FUNGSI: showReportFoundScreen   (flowchart: "Input temuan" -> "addFoundItem" -> "Pesan")
-// TUJUAN: meminta laporan barang temuan dan menyimpan jika berhasil.
-// Penjelasan: Fungsi ini membaca data, mengirimnya ke addFoundItem, lalu menampilkan hasilnya.
-// CONTOH: description kosong tetap dapat berhasil jika field wajib lain valid.
-void showReportFoundScreen(int userIndex)
-{
-  printHeader("Lapor Barang Temuan");
+// Runs the terminal locker deposit screen.
+void showReportFoundScreen(int userIndex) {
+  printHeader("Titip Barang");
 
-  // 1. Ambil input dengan readLine
   std::string name = readLine("Nama barang: ");
   std::string category = readLine("Kategori: ");
   std::string location = readLine("Lokasi ditemukan: ");
   std::string date = readLine("Tanggal (YYYY-MM-DD): ");
+  std::string photo = trim(readLine("Path foto wajib: "));
   std::string description = readLine("Deskripsi (boleh kosong): ");
-  std::string secretDetail = readLine("Detail rahasia (untuk verifikasi klaim): ");
+  std::string secretDetail =
+      readLine("Detail rahasia (untuk verifikasi klaim): ");
 
-  // 2. Panggil addFoundItem dan simpan kode hasilnya
-  int result = addFoundItem(userIndex, name, category, location, date, description, secretDetail);
+  int result = reserveFoundItem(userIndex, name, category, location, date,
+                                description, secretDetail, photo);
 
-  // 3. Tampilkan pesan berdasarkan kode ITEM_* memakai if/else (tanpa mencetak secret detail)
-  if (result == ITEM_OK)
-  {
-    std::cout << "Laporan barang temuan berhasil disimpan!\n";
-    // 4. Jika ITEM_OK, panggil saveAll tepat sekali
-    saveAll();
+  if (result == ITEM_EMPTY_FIELD) {
+    std::cout << "Gagal: Semua kolom wajib dan path foto harus diisi.\n";
+    pauseScreen();
+    return;
   }
-  else if (result == ITEM_EMPTY_FIELD)
-  {
-    std::cout << "Gagal: Semua kolom wajib harus diisi (kecuali deskripsi).\n";
-  }
-  else if (result == ITEM_INVALID_DATE)
-  {
+  if (result == ITEM_INVALID_DATE) {
     std::cout << "Gagal: Format tanggal tidak valid (gunakan YYYY-MM-DD).\n";
+    pauseScreen();
+    return;
   }
-  else if (result == ITEM_FUTURE_DATE)
-  {
+  if (result == ITEM_FUTURE_DATE) {
     std::cout << "Gagal: Tanggal tidak boleh berada di masa depan.\n";
+    pauseScreen();
+    return;
   }
-  else if (result == ITEM_FULL)
-  {
+  if (result == ITEM_FULL) {
     std::cout << "Gagal: Penyimpanan laporan temuan sudah penuh.\n";
+    pauseScreen();
+    return;
   }
-  else
-  {
-    std::cout << "Gagal: Terjadi kesalahan yang tidak diketahui.\n";
+  if (result == ITEM_LOCKER_FULL) {
+    std::cout << "Gagal: Semua loker sedang terisi atau direservasi.\n";
+    pauseScreen();
+    return;
   }
 
-  // 5. Panggil pauseScreen sebelum kembali ke menu
+  int itemIndex = foundCount - 1;
+  saveAll();
+  std::cout << "Reservasi 10 menit berhasil. Loker: "
+            << lockerLabel(foundLocker[itemIndex]) << "\n";
+  std::cout << "Kode titip sekali pakai: " << foundDepositCode[itemIndex]
+            << "\n";
+
+  int failedAttempts = 0;
+  while (failedAttempts < MAX_CLAIM_ATTEMPTS) {
+    if ((long)time(0) > foundReservationExpiry[itemIndex]) {
+      cancelDepositReservation(itemIndex);
+      saveAll();
+      std::cout << "Reservasi habis; kode titip dihanguskan.\n";
+      pauseScreen();
+      return;
+    }
+
+    std::string code = trim(readLine("Masukkan kode titip di loker: "));
+    if (code == foundDepositCode[itemIndex]) {
+      std::cout << "Pintu loker terbuka.\n";
+      break;
+    }
+
+    failedAttempts++;
+    if (failedAttempts < MAX_CLAIM_ATTEMPTS) {
+      std::cout << "Kode salah. Percobaan tersisa: "
+                << MAX_CLAIM_ATTEMPTS - failedAttempts << "\n";
+    }
+  }
+
+  if (failedAttempts >= MAX_CLAIM_ATTEMPTS) {
+    cancelDepositReservation(itemIndex);
+    saveAll();
+    std::cout << "Kode salah tiga kali; reservasi dibatalkan.\n";
+    pauseScreen();
+    return;
+  }
+
+  while (true) {
+    int sensor =
+        readInt("\nSimulasi loker:\n"
+                "1. Barang ditaruh, pintu tertutup, sensor terdeteksi\n"
+                "2. Belum selesai\n"
+                "3. Simulasikan batas waktu 2 menit\n"
+                "Pilih: ",
+                1, 3);
+
+    if (sensor == 1) {
+      foundStatus[itemIndex] = STATUS_AVAILABLE;
+      foundDepositCode[itemIndex] = "";
+      foundReservationExpiry[itemIndex] = 0;
+      saveAll();
+      std::cout << "Barang tersimpan dan tampil di daftar publik.\n";
+      break;
+    }
+
+    if (sensor == 3) {
+      foundStatus[itemIndex] = STATUS_NEEDS_VERIFICATION;
+      foundDepositCode[itemIndex] = "";
+      foundReservationExpiry[itemIndex] = 0;
+      saveAll();
+      std::cout << "Anomali tercatat; loker dikunci untuk verifikasi admin.\n";
+      break;
+    }
+  }
+
   pauseScreen();
 }
 
-// FUNGSI: showReportLostScreen   (flowchart: "Input hilang" -> "addLostReport" -> "Pesan")
-// TUJUAN: meminta laporan kehilangan dan menyimpan jika berhasil.
-// Penjelasan: Fungsi ini dapat memakai nama rekomendasi dari pencarian lalu menampilkan hasil penambahan laporan.
-// CONTOH: pencarian dompet kosong -> nama awal dompet.
-void showReportLostScreen(int userIndex, std::string prefillName)
-{
+// Runs the terminal lost-item report screen.
+void showReportLostScreen(int userIndex, std::string prefillName) {
   printHeader("Lapor Barang Hilang");
 
   std::string name = "";
-  // 1. Jika prefillName tidak kosong, tampilkan dan tawarkan sebagai nama awal; tetap gunakan readLine untuk nama akhir
-  if (prefillName != "")
-  {
-    std::cout << "Nama barang (rekomendasi dari pencarian: " << prefillName << ")\n";
-    name = readLine("Nama barang akhir [Tekan Enter untuk pakai rekomendasi]: ");
-    if (trim(name) == "")
-    {
+  if (prefillName != "") {
+    std::cout << "Nama barang (rekomendasi dari pencarian: " << prefillName
+              << ")\n";
+    name =
+        readLine("Nama barang akhir [Tekan Enter untuk pakai rekomendasi]: ");
+    if (trim(name) == "") {
       name = prefillName;
     }
-  }
-  else
-  {
+  } else {
     name = readLine("Nama barang: ");
   }
 
-  // 2. Ambil category, location, date, dan description dengan readLine
   std::string category = readLine("Kategori: ");
   std::string location = readLine("Lokasi hilang: ");
   std::string date = readLine("Tanggal hilang (YYYY-MM-DD): ");
   std::string description = readLine("Deskripsi (boleh kosong): ");
 
-  // 3. Panggil addLostReport lalu tampilkan pesan ITEM_* dengan if/else
-  int result = addLostReport(userIndex, name, category, location, date, description);
+  int result =
+      addLostReport(userIndex, name, category, location, date, description);
 
-  if (result == ITEM_OK)
-  {
+  if (result == ITEM_OK) {
     std::cout << "Laporan barang hilang berhasil disimpan!\n";
-    // 4. Jika ITEM_OK, panggil saveAll
     saveAll();
-  }
-  else if (result == ITEM_EMPTY_FIELD)
-  {
+  } else if (result == ITEM_EMPTY_FIELD) {
     std::cout << "Gagal: Semua kolom wajib harus diisi (kecuali deskripsi).\n";
-  }
-  else if (result == ITEM_INVALID_DATE)
-  {
+  } else if (result == ITEM_INVALID_DATE) {
     std::cout << "Gagal: Format tanggal tidak valid (gunakan YYYY-MM-DD).\n";
-  }
-  else if (result == ITEM_FUTURE_DATE)
-  {
+  } else if (result == ITEM_FUTURE_DATE) {
     std::cout << "Gagal: Tanggal tidak boleh berada di masa depan.\n";
-  }
-  else if (result == ITEM_FULL)
-  {
+  } else if (result == ITEM_FULL) {
     std::cout << "Gagal: Penyimpanan laporan hilang sudah penuh.\n";
-  }
-  else
-  {
+  } else {
     std::cout << "Gagal: Terjadi kesalahan yang tidak diketahui.\n";
   }
 
-  // Kemudian pauseScreen
   pauseScreen();
 }
 
-// PEMILIK TODO: Muflih
-// FUNGSI: showMyReportsScreen   (flowchart: "User" -> "listItemsByReporter" ->
-// "Daftar") TUJUAN: menampilkan semua barang temuan yang dilaporkan pengguna
-// aktif.
-// TODO:
-//  [ ] 1. Panggil listItemsByReporter(userIndex).
-//  [ ] 2. Jika hasil 0, tampilkan pesan belum ada laporan.
-//  [ ] 3. Jika ada, loop searchResult dan tampilkan nomor toDisplayNo(index),
-//  nama, lokasi, tanggal, dan status. [ ] 4. Jangan tampilkan foundSecret; lalu
-//  pauseScreen.
-// CONTOH: item indeks 0 tercetak sebagai nomor 1, bukan 0.
-// HATI-HATI: searchResult menyimpan indeks asli; status boleh Dikembalikan
-// tetap muncul di laporan saya. SELESAI JIKA: [ ] M-ITEM-6 lulus. JANGAN ubah
-// nama, parameter, atau tipe return fungsi ini tanpa lapor semua pemilik modul.
-void showMyReportsScreen(int userIndex)
-{
+// Shows the active user’s found-item reports.
+void showMyReportsScreen(int userIndex) {
   printHeader("Laporan Saya");
 
   int count = listItemsByReporter(userIndex);
 
-  if (count == 0)
-  {
+  if (count == 0) {
     std::cout << "Kamu belum memiliki laporan barang temuan.\n";
     pauseScreen();
     return;
   }
 
-  for (int i = 0; i < searchResultCount; i++)
-  {
+  for (int i = 0; i < searchResultCount; i++) {
     int index = searchResult[i];
 
     std::cout << "\nNomor    : " << toDisplayNo(index) << "\n";
@@ -1333,37 +1553,28 @@ void showMyReportsScreen(int userIndex)
     std::cout << "Lokasi   : " << foundLocation[index] << "\n";
     std::cout << "Tanggal  : " << foundDate[index] << "\n";
     std::cout << "Status   : " << foundStatus[index] << "\n";
-    // foundSecret sengaja tidak ditampilkan
   }
 
   pauseScreen();
 }
 
-// FUNGSI: showClaimFlowScreen   (flowchart: "Cari" -> "Pilih" -> "Jawab detail" -> "Klaim")
-// TUJUAN: mengarahkan pengguna dari pencarian barang sampai hasil klaim.
-// Penjelasan: Fungsi ini menampilkan hasil pencarian, memvalidasi pilihan, dan memproses jawaban detail rahasia.
-// CONTOH: jawaban benar -> kontak penemu ditampilkan.
-void showClaimFlowScreen(int userIndex)
-{
+// Runs the terminal search, claim, and pickup flow.
+void showClaimFlowScreen(int userIndex) {
   printHeader("Cari dan Klaim Barang");
 
-  // Ambil filter pencarian dari pengguna
   std::string keyword = readLine("Nama atau deskripsi barang: ");
   std::string category = readLine("Kategori barang: ");
   std::string location = readLine("Lokasi ditemukan: ");
 
-  // Cari barang yang masih tersedia
   int resultCount = searchAvailableItems(keyword, category, location);
 
-  // Jika tidak ada barang yang ditemukan
   if (resultCount == 0) {
     std::cout << "\nBarang tidak ditemukan\n";
-    int choice = readInt(
-      "Apakah anda ingin membuat laporan barang hilang?\n"
-      "1. Ya\n"
-      "2. Tidak\n"
-      "Pilih: ", 1, 2
-    );
+    int choice = readInt("Apakah anda ingin membuat laporan barang hilang?\n"
+                         "1. Ya\n"
+                         "2. Tidak\n"
+                         "Pilih: ",
+                         1, 2);
 
     if (choice == 1) {
       showReportLostScreen(userIndex, keyword);
@@ -1372,7 +1583,6 @@ void showClaimFlowScreen(int userIndex)
     return;
   }
 
-  // Tampilkan daftar barang yang tersedia
   std::cout << "\n=== Daftar Barang Ditemukan ===\n";
 
   int maxDisplayNo = 0;
@@ -1393,18 +1603,14 @@ void showClaimFlowScreen(int userIndex)
     }
   }
 
-  // Minta nomor barang yang ingin diklaim
-  int displayNo = readInt(
-    "\nMasukkan nomor barang yang ingin diklaim: ", 1,
-    maxDisplayNo
-  );
+  int displayNo =
+      readInt("\nMasukkan nomor barang yang ingin diklaim: ", 1, maxDisplayNo);
 
   int itemIndex = toIndex(displayNo);
 
-  // Pastikan nomor yang dipilih benar-benar ada dalam hasil pencarian
   bool isFound = false;
 
-  for (int i = 0; i < searchResultCount; i++){
+  for (int i = 0; i < searchResultCount; i++) {
     if (searchResult[i] == itemIndex) {
       isFound = true;
       break;
@@ -1417,31 +1623,31 @@ void showClaimFlowScreen(int userIndex)
     return;
   }
 
-  // Ambil jawaban detail rahasia dan proses klaim
-  std::string secretAnswer = readLine(
-    "Masukkan detail khusus untuk membuktikan kepemilikan: "
-  );
+  std::string secretAnswer =
+      readLine("Masukkan detail khusus untuk membuktikan kepemilikan: ");
 
   int claimResult = submitClaim(userIndex, itemIndex, secretAnswer);
 
-  // tampilkan pesan berdasarkan hasil klaim
   if (claimResult == CLAIM_APPROVED) {
-    std::cout << "\nKlaim berhasil disetujui!\n";
-    std::cout << "Silahkan hubungi penemu barang:\n";
-    std::cout << getFinderContact(itemIndex) << "\n";
-
-    // Simpan perubahan status barang
+    std::cout << "\nKlaim berhasil disetujui.\n";
+    if (foundLocker[itemIndex] >= 0) {
+      std::cout << "Loker: " << lockerLabel(foundLocker[itemIndex]) << "\n";
+    }
+    std::cout << "Kode ambil berlaku 24 jam: " << foundPickupCode[itemIndex]
+              << "\n";
     saveAll();
+    showPickupFlow(userIndex, itemIndex);
 
   } else if (claimResult == CLAIM_WRONG_DETAIL) {
     std::cout << "\nDetail yang kamu masukkan salah.\n";
     std::cout << "Silahkan periksa kembali informasi barang.\n";
 
-    //simpan penambahan jumlah percobaan salah
     saveAll();
 
   } else if (claimResult == CLAIM_TOO_MANY_ATTEMPTS) {
-    std::cout << "\nKamu sudah mencapai batas percobaan klaim.\n";
+    std::cout
+        << "\nKamu sudah mencapai batas percobaan klaim; hubungi admin.\n";
+    saveAll();
 
   } else if (claimResult == CLAIM_ITEM_NOT_FOUND) {
     std::cout << "\nBarang tidak ditemukan.\n";
@@ -1457,65 +1663,120 @@ void showClaimFlowScreen(int userIndex)
 
   } else {
     std::cout << "\nTerjadi kesalahan yang tidak diketahui.\n";
-
   }
 
-  // kembali setelah pengguna membaca hasil klaim
   pauseScreen();
 }
 
-// Ilham
-// ============ main() ============
+// Runs the terminal admin anomaly and locker workflow.
+void showAdminMenu() {
+  bool active = true;
+  while (active) {
+    printHeader("Menu Admin");
+    int choice = readInt("1. Lihat anomali\n2. Tangani barang\n3. Status "
+                         "loker\n4. Logout\nPilih: ",
+                         1, 4);
+    if (choice == 1) {
+      bool found = false;
+      for (int i = 0; i < foundCount; i++) {
+        if (foundStatus[i] == STATUS_NEEDS_VERIFICATION ||
+            foundStatus[i] == STATUS_PICKUP_LOCKED ||
+            (foundStatus[i] == STATUS_AVAILABLE &&
+             isUnclaimedFor30Days(foundDate[i]))) {
+          std::cout << toDisplayNo(i) << ". " << foundName[i] << " - "
+                    << foundStatus[i] << "\n";
+          found = true;
+        }
+      }
+      if (!found)
+        std::cout << "Tidak ada anomali aktif.\n";
+      pauseScreen();
+    } else if (choice == 2) {
+      int item = toIndex(readInt("Nomor barang: ", 1, foundCount));
+      if (foundStatus[item] == STATUS_PICKUP_LOCKED) {
+        int verified = readInt("Pemilik terverifikasi?\n1. Ya, kode baru\n2. "
+                               "Tidak, batalkan klaim\nPilih: ",
+                               1, 2);
+        if (verified == 1) {
+          foundStatus[item] = STATUS_CLAIM_PENDING;
+          foundPickupCode[item] = makePickupCode();
+          foundPickupExpiry[item] = (long)time(0) + 24 * 60 * 60;
+          foundPickupFailed[item] = 0;
+          std::cout << "Kode ambil baru: " << foundPickupCode[item] << "\n";
+        } else {
+          foundStatus[item] = STATUS_AVAILABLE;
+          clearPickupDetails(item);
+        }
+        saveAll();
+      } else if (foundStatus[item] == STATUS_NEEDS_VERIFICATION) {
+        int action = readInt(
+            "1. Reset: barang tersedia\n2. Tandai loker rusak\nPilih: ", 1, 2);
+        if (action == 1) {
+          foundStatus[item] = STATUS_AVAILABLE;
+        } else if (foundLocker[item] >= 0) {
+          lockerBroken[foundLocker[item]] = true;
+        }
+        saveAll();
+      } else if (foundStatus[item] == STATUS_AVAILABLE &&
+                 isUnclaimedFor30Days(foundDate[item])) {
+        foundStatus[item] = STATUS_CAMPUS_HANDOFF;
+        foundLocker[item] = -1;
+        clearPickupDetails(item);
+        saveAll();
+        std::cout << "Barang diserahkan ke pengelola kampus.\n";
+      } else {
+        std::cout << "Barang ini tidak memerlukan tindakan admin.\n";
+      }
+      pauseScreen();
+    } else if (choice == 3) {
+      for (int i = 0; i < MAX_LOCKERS; i++)
+        std::cout << lockerLabel(i) << ": "
+                  << (lockerBroken[i] ? "Rusak" : "Siap") << "\n";
+      pauseScreen();
+    } else {
+      active = false;
+    }
+  }
+}
 
-// FUNGSI: main   (flowchart: "Mulai" -> "loadAll" -> "Menu tamu/pengguna" -> "Keluar")
-// TUJUAN: memulai data dan menjaga menu berjalan sampai pengguna keluar.
-// Penjelasan: Fungsi ini memuat data, menampilkan menu tamu dan pengguna, lalu mengarahkan ke layar terkait.
-// CONTOH: pilih 3 di menu tamu -> program berhenti normal.
-int main()
-{
+// Starts the application and routes guest, student, and admin menus.
+int main() {
   loadAll();
-  if (userCount == 0)
-  {
+  if (userCount == 0) {
     loadDemoData();
   }
+  ensureDemoAdmin();
 
   bool isRunning = true;
-  while (isRunning)
-  {
+  while (isRunning) {
     printHeader("Lost and Found Management System");
-    int guestChoice = readInt("1. Register\n2. Login\n3. Keluar\nPilih: ", 1, 3);
+    int guestChoice =
+        readInt("1. Register\n2. Login\n3. Keluar\nPilih: ", 1, 3);
 
-    if (guestChoice == 1)
-    {
+    if (guestChoice == 1) {
       showRegisterScreen();
-    }
-    else if (guestChoice == 2)
-    {
+    } else if (guestChoice == 2) {
       int userIndex = showLoginScreen();
-      while (userIndex >= 0)
-      {
+      if (userIndex >= 0 && userRole[userIndex] == ROLE_ADMIN) {
+        showAdminMenu();
+        userIndex = -1;
+      }
+      while (userIndex >= 0) {
         printHeader("Menu Pengguna");
-        int userChoice = readInt("1. Lapor temuan\n2. Klaim barang\n3. Laporan saya\n4. Logout\nPilih: ", 1, 4);
-        if (userChoice == 1)
-        {
+        int userChoice = readInt("1. Titip barang\n2. Klaim barang\n3. Laporan "
+                                 "saya\n4. Logout\nPilih: ",
+                                 1, 4);
+        if (userChoice == 1) {
           showReportFoundScreen(userIndex);
-        }
-        else if (userChoice == 2)
-        {
+        } else if (userChoice == 2) {
           showClaimFlowScreen(userIndex);
-        }
-        else if (userChoice == 3)
-        {
+        } else if (userChoice == 3) {
           showMyReportsScreen(userIndex);
-        }
-        else
-        {
+        } else {
           userIndex = -1;
         }
       }
-    }
-    else
-    {
+    } else {
       isRunning = false;
     }
   }
