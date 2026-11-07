@@ -6,11 +6,21 @@ Kerangka proyek C++ terminal untuk tim mahasiswa semester 1. Program akan mencat
 
 **Patokan utama:** seluruh program berada di `src/main.cpp`; kompilasi file itu dengan perintah berikut.
 
+Install the MariaDB Connector/C development package, migrate the schema, then provide database credentials through the environment:
+
 ```bash
-g++ -std=c++11 -Wall -Wextra src/main.cpp -o lostfound
+sudo dnf install mariadb-connector-c-devel
+mariadb -u <user> -p < database.sql
+
+export DB_HOST=127.0.0.1
+export DB_PORT=3306
+export DB_NAME=lostfound
+export DB_USER=<user>
+export DB_PASSWORD=<password>
+
+g++ -std=c++11 -Wall -Wextra src/main.cpp $(mariadb_config --cflags --libs) -o lostfound
 ./lostfound
 ```
-
 
 Pilih `3` pada menu tamu untuk keluar. Setelah TODO diisi, jalankan ulang skenario di `tests/manual_tests.md`.
 
@@ -41,9 +51,9 @@ Semua kode ada dalam satu file: `src/main.cpp`. Setiap pemilik bekerja hanya pad
 
 - Fase 1 **tidak memakai** `.h`, `struct`, `vector`, class, pointer, referensi, atau template. Semua data ada pada array paralel global.
 - Semua bagian sengaja digabung dalam satu `main.cpp`; banner kepemilikan menjaga pembagian kerja tetap jelas.
-- Password disimpan polos (apa adanya). Ini tidak aman untuk aplikasi nyata dan hanya boleh untuk latihan.
+- Password dan kode akses disimpan sebagai hash SHA-256; aplikasi tetap hanya cocok untuk latihan, bukan produksi.
 - Akun yang terkunci tidak memiliki jalur buka dari menu; satu-satunya cara saat ini adalah mengedit data.
-- Penyimpanan file `data/*.txt` bersifat opsional. Stub `loadAll`/`saveAll` aman bila belum diisi.
+- Penyimpanan memakai MariaDB/MySQL melalui `loadAll`/`saveAll`; kredensial hanya dibaca dari variabel `DB_*` saat runtime.
 - Tidak ada penghapusan data; indeks array tidak bergeser. Admin demo (`admin` / `admin123`) saat ini hanya memiliki menu logout sampai modul loker dan anomali ditambahkan.
 
 Baca `docs/data-model.md` sebelum mengubah array dan `docs/TASKS.md` sebelum mulai mengisi TODO.
