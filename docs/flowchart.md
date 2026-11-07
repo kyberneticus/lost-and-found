@@ -22,7 +22,8 @@ flowchart TD
         LOG3 --> LOG1
         LOG2 -->|"Ya"| ROLE{"Peran pengguna?"}
         ROLE -->|"Mahasiswa"| MENU{"Pilihan menu mahasiswa"}
-        MENU -->|"4 Logout"| LOGOUT(["Selesai"])
+        MENU -->|"4 Logout"| LOGOUT(["Kembali ke menu utama"])
+        LOGOUT --> MULAI
     end
 
     ROLE -->|"Admin"| ADM1
@@ -34,7 +35,7 @@ flowchart TD
     %% PROSES 1: TITIP BARANG
     %% ==========================
     subgraph TITIP["Proses 1: Titip Barang"]
-        T1[/"Input nama, kategori, ciri-ciri, lokasi temuan, foto wajib, detail verifikasi rahasia"/] --> T2{"Semua data dan foto lengkap?"}
+        T1[/"Input nama, kategori, lokasi temuan, foto wajib, detail verifikasi rahasia; ciri-ciri opsional"/] --> T2{"Data wajib dan foto lengkap?"}
         T2 -->|"Tidak"| T1
         T2 -->|"Ya"| T3["Cek ketersediaan loker"]
         T3 --> T4{"Ada loker Kosong?"}
@@ -45,15 +46,15 @@ flowchart TD
         T7 --> T8[/"Penemu input kode di loker"/]
         T8 --> T9{"Hasil validasi kode?"}
         T9 -->|"Salah, percobaan tersisa"| T8
-        T9 -->|"Gagal 3 kali atau reservasi habis"| T10["Batalkan reservasi, loker Kosong, kode hangus, catat log"]
+        T9 -->|"Gagal 3 kali atau reservasi habis"| T10["Batalkan reservasi, loker READY, kode hangus; simpan event PIN gagal"]
         T10 --> TZ2(["Selesai"])
-        T9 -->|"Valid"| T11["Pintu terbuka, catat log buka"]
-        T11 --> T12[/"Penemu taruh barang dan tutup pintu"/]
-        T12 --> T13{"Pintu tertutup dan sensor mendeteksi barang?"}
-        T13 -->|"Belum, waktu masih ada"| T12
-        T13 -->|"Lewat 2 menit"| T14["Catat anomali, loker dikunci, notifikasi admin"]
+        T9 -->|"Valid"| T11["Pintu loker terbuka"]
+        T11 --> T12[/"Penemu taruh barang dan tutup pintu, atau laporkan masalah loker"/]
+        T12 --> T13{"Barang ditaruh dan pintu tertutup?"}
+        T13 -->|"Belum"| T12
+        T13 -->|"Laporkan masalah"| T14["Simpan event anomali, status Perlu Verifikasi; tampilkan di menu admin"]
         T14 --> TZ3(["Selesai"])
-        T13 -->|"Ya"| T15["Loker Terisi, kode titip hangus, status barang Tersedia, catat log tutup"]
+        T13 -->|"Ya"| T15["Loker FULL, kode titip hangus, status barang Tersedia; simpan event drop-off"]
         T15 --> T16[/"Barang tampil di daftar publik tanpa detail rahasia"/]
         T16 --> TZ4(["Selesai"])
     end
@@ -69,7 +70,7 @@ flowchart TD
         K5 --> K6["Simpan laporan kehilangan"]
         K6 --> KZ1(["Selesai"])
         K4 -->|"Tidak"| KZ1
-        K3 -->|"Ya"| K7[/"Tampilkan daftar: foto, kategori, ciri umum"/]
+        K3 -->|"Ya"| K7[/"Tampilkan daftar: nama, kategori, lokasi, tanggal, ciri umum"/]
         K7 --> K8[/"Pilih barang"/]
         K8 --> K9{"Barang Tersedia dan belum ada klaim aktif?"}
         K9 -->|"Tidak"| K10[/"Pesan: barang tidak dapat diklaim"/]
@@ -77,7 +78,7 @@ flowchart TD
         K9 -->|"Ya"| K11[/"Input data verifikasi non-publik"/]
         K11 --> K12{"Hasil pencocokan dengan data penemu?"}
         K12 -->|"Tidak cocok, kesempatan tersisa"| K11
-        K12 -->|"Gagal 3 kali"| K16["Klaim diblokir, notifikasi admin"]
+        K12 -->|"Gagal 3 kali"| K16["Klaim diblokir; tampilkan di menu admin"]
         K16 --> K17[/"Pesan: hubungi admin"/]
         K17 --> KZ3(["Selesai"])
         K12 -->|"Cocok"| K13["Klaim disetujui, status barang Dalam Klaim"]
@@ -95,16 +96,16 @@ flowchart TD
         A2 -->|"Salah, kesempatan tersisa"| A1
         A2 -->|"Kedaluwarsa"| A3["Klaim Kedaluwarsa, status barang kembali Tersedia"]
         A3 --> AZ1(["Selesai"])
-        A2 -->|"Gagal 3 kali"| A4["Kunci kode, catat log, notifikasi admin"]
+        A2 -->|"Gagal 3 kali"| A4["Kunci kode, simpan event PIN gagal; tampilkan di menu admin"]
         A4 --> AZ2(["Selesai"])
-        A2 -->|"Valid"| A5["Pintu terbuka, catat log buka"]
-        A5 --> A6[/"Ambil barang dan tutup pintu"/]
-        A6 --> A7{"Pintu tertutup dan sensor loker kosong?"}
-        A7 -->|"Belum, waktu masih ada"| A6
-        A7 -->|"Lewat 2 menit"| A8["Catat anomali, loker dikunci, status Perlu Verifikasi, notifikasi admin"]
+        A2 -->|"Valid"| A5["Pintu loker terbuka"]
+        A5 --> A6[/"Ambil barang dan tutup pintu, atau laporkan masalah loker"/]
+        A6 --> A7{"Barang diambil dan pintu tertutup?"}
+        A7 -->|"Belum"| A6
+        A7 -->|"Laporkan masalah"| A8["Simpan event anomali, status Perlu Verifikasi; tampilkan di menu admin"]
         A8 --> AZ3(["Selesai"])
-        A7 -->|"Ya"| A9["Kode ambil hangus, status barang Sudah Diambil, klaim Selesai, loker Kosong, catat log"]
-        A9 --> A10[/"Notifikasi selesai ke pengambil dan penemu"/]
+        A7 -->|"Ya"| A9["Kode ambil hangus, status barang Sudah Diambil, klaim Selesai, loker READY; simpan event pickup"]
+        A9 --> A10[/"Tampilkan pesan selesai pada terminal"/]
         A10 --> AZ4(["Selesai"])
     end
 
@@ -112,25 +113,28 @@ flowchart TD
     %% PROSES: RIWAYAT SAYA
     %% ==========================
     subgraph RIWAYAT["Riwayat Saya"]
-        R1[/"Tampilkan riwayat titipan dan klaim beserta status"/] --> RZ(["Selesai"])
+        R1[/"Tampilkan riwayat titipan dan klaim: barang, status, dan waktu pengajuan"/] --> RZ(["Selesai"])
     end
 
     %% ==========================
     %% PROSES 4: ADMIN
     %% ==========================
-    subgraph ADMIN["Proses 4: Admin, Anomali, dan Kedaluwarsa"]
-        ADM1[/"Buka daftar anomali dan barang tanpa klaim lebih dari 30 hari"/] --> ADM2{"Jenis kasus?"}
-        ADM2 -->|"Loker terkunci"| ADM3[/"Periksa fisik loker dan log"/]
-        ADM3 --> ADM4["Reset loker atau tandai Rusak"]
+    subgraph ADMIN["Proses 4: Admin, Anomali, Klaim, dan Loker"]
+        ADM1[/"Buka menu admin: anomali, klaim diblokir, status loker, dan barang tanpa klaim lebih dari 30 hari"/] --> ADM2{"Jenis kasus?"}
+        ADM2 -->|"Loker Perlu Verifikasi"| ADM3[/"Pilih barang anomali"/]
+        ADM3 --> ADM4["Reset barang atau tandai loker DEFECTIVE"]
         ADM4 --> ADZ(["Selesai"])
-        ADM2 -->|"Klaim diblokir"| ADM5[/"Verifikasi manual ke pengklaim"/]
+        ADM2 -->|"Klaim diblokir"| ADM5[/"Tampilkan barang dan pengklaim; verifikasi manual"/]
+        ADM2 -->|"Kode ambil terkunci"| ADM5
         ADM5 --> ADM6{"Terbukti pemilik?"}
-        ADM6 -->|"Ya"| ADM7["Terbitkan kode ambil baru"]
+        ADM6 -->|"Ya"| ADM7["Terbitkan kode ambil baru, berlaku 24 jam"]
         ADM7 --> ADZ
         ADM6 -->|"Tidak"| ADM8["Tolak klaim dan catat"]
         ADM8 --> ADZ
         ADM2 -->|"Barang tanpa klaim 30 hari"| ADM9["Serahkan ke pengelola kampus"]
         ADM9 --> ADZ
+        ADM2 -->|"Status loker"| ADM10["Tampilkan READY, FULL, atau DEFECTIVE"]
+        ADM10 --> ADZ
     end
 
     %% ==========================
