@@ -70,13 +70,11 @@ Record pengguna valid berada pada indeks `0` sampai `userCount - 1`.
 
 `claimItem`, `claimUser`, dan `claimFailed` adalah satu record. Satu pasangan item-pengguna harus mempunyai satu baris percobaan klaim.
 
-## Format file opsional
+## Penyimpanan database
 
-Storage memakai `data/*.txt`, satu record per baris, pemisah `|`. Semua teks perlu disanitasi: `|`, newline, dan carriage return diganti `/`. File yang tidak ada berarti jumlah record terkait `0`; baris rusak dilewati.
+`src/main.cpp` memuat dan menyimpan data melalui MariaDB/MySQL. Konfigurasi dibaca saat runtime dari `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, dan `DB_PASSWORD`; lihat `README.md` untuk perintah build. Struktur relasional berada di `database.sql` dan mengikuti `docs/erd.drawio` serta `docs/rat.drawio`.
 
-| File | Urutan field | Contoh satu baris valid |
-| --- | --- | --- |
-| `data/users.txt` | `nim|password|phone|failed|locked(0/1)|fullName|major|email|role` | `12345|rahasia|08123456789|0|0|Andi|Informatika|andi@example.com|Mahasiswa` |
-| `data/found_items.txt` | `reporterIndex|name|category|location|date|description|secret|status|photo|locker|depositCode|reservationExpiry|claimant|pickupCode|pickupExpiry|pickupFailed` | `0|Payung|Aksesoris|Kantin|2025-08-17|Payung hitam|Pegangan kayu|Tersedia|payung.jpg|0||0|-1||0|0` |
-| `data/lost_reports.txt` | `reporterIndex|name|category|location|date|description` | `1|Dompet|Aksesoris|Perpustakaan|2025-08-16|Warna cokelat` |
-| `data/claim_attempts.txt` | `itemIndex|userIndex|failedCount` | `0|1|2` |
+- `users`, `items`, dan `lost_reports` menyimpan record utama.
+- `categories` dan `locations` menormalkan kategori serta lokasi yang dipilih pengguna.
+- `deposits`, `claims`, dan `access_codes` menyimpan alur loker tanpa menyimpan password atau kode akses dalam plaintext.
+- `item_photos` menyimpan foto; `locker_event_logs` disediakan untuk audit loker.

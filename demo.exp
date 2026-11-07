@@ -22,9 +22,20 @@ proc s {text {pause 0.8}} {
 
 set project [file normalize [file dirname [info script]]]
 set binary "$project/lostfound"
+foreach variable {DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD} {
+  if {![info exists env($variable)]} {
+    puts stderr "Atur $variable sebelum menjalankan demo."
+    exit 1
+  }
+}
 if {![file executable $binary]} {
   puts "Membangun lostfound..."
-  if {[catch {exec g++ -std=c++11 -Wall -Wextra "$project/src/main.cpp" -o $binary} message]} {
+  set buildCommand [list g++ -std=c++11 -Wall -Wextra "$project/src/main.cpp"]
+  foreach flag [split [exec mariadb_config --cflags --libs]] {
+    lappend buildCommand $flag
+  }
+  lappend buildCommand -o $binary
+  if {[catch {eval exec $buildCommand} message]} {
     puts stderr $message
     exit 1
   }
