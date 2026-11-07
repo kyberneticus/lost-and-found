@@ -83,7 +83,7 @@ string foundName[MAX_FOUND], foundCategory[MAX_FOUND],
     foundSecret[MAX_FOUND], foundStatus[MAX_FOUND], foundPhoto[MAX_FOUND],
     foundDepositCode[MAX_FOUND], foundPickupCode[MAX_FOUND];
 int foundLocker[MAX_FOUND], foundClaimant[MAX_FOUND],
-    foundPickupFailed[MAX_FOUND];
+    foundDepositFailed[MAX_FOUND], foundPickupFailed[MAX_FOUND];
 long foundReservationExpiry[MAX_FOUND], foundPickupExpiry[MAX_FOUND];
 bool lockerBroken[MAX_LOCKERS];
 int foundCount = 0;
@@ -150,6 +150,7 @@ void loadDemoData() {
   foundLocker[0] = 0;
   foundDepositCode[0] = "";
   foundReservationExpiry[0] = 0;
+  foundDepositFailed[0] = 0;
   foundClaimant[0] = -1;
   foundPickupCode[0] = "";
   foundPickupExpiry[0] = 0;
@@ -168,6 +169,7 @@ void loadDemoData() {
   foundLocker[1] = 1;
   foundDepositCode[1] = "";
   foundReservationExpiry[1] = 0;
+  foundDepositFailed[1] = 0;
   foundClaimant[1] = -1;
   foundPickupCode[1] = "";
   foundPickupExpiry[1] = 0;
@@ -675,6 +677,32 @@ int databaseLockerIdForIndex(int lockerIndex) {
   return databaseLockerId[lockerIndex];
 }
 
+bool databaseLogLockerEvent(int lockerIndex, int depositId, string eventType,
+                            string detail) {
+  int lockerId = databaseLockerIdForIndex(lockerIndex);
+  if (lockerId == 0) {
+    return false;
+  }
+
+  string deposit = depositId == 0 ? "NULL" : to_string(depositId);
+  return databaseExecute(
+      "INSERT INTO locker_event_logs (id_locker, id_deposit, tipe_event, "
+      "keterangan) VALUES (" +
+      to_string(lockerId) + ", " + deposit + ", " +
+      databaseQuote(eventType) + ", " + databaseQuote(detail) + ")");
+}
+
+bool lockerIsOccupied(int lockerIndex) {
+  for (int item = 0; item < foundCount; item++) {
+    if (foundLocker[item] == lockerIndex &&
+        foundStatus[item] != STATUS_DEPOSIT_CANCELLED &&
+        foundStatus[item] != STATUS_PICKED_UP) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool databasePasswordMatches(string nim, string password) {
   return databaseSingleId("SELECT 1 FROM users WHERE nim = " +
                           databaseQuote(nim) +
@@ -902,6 +930,8 @@ bool databaseLoadAccessCodes() {
         databaseDepositCodeId[itemIndex] =
             static_cast<int>(databaseNumber(row[0]));
         foundReservationExpiry[itemIndex] = databaseNumber(row[4]);
+        foundDepositFailed[itemIndex] =
+            static_cast<int>(databaseNumber(row[5]));
       }
     } else if (type == "PICKUP") {
       int itemIndex = databaseItemIndexByClaim(
@@ -1028,16 +1058,9 @@ bool databaseSaveLockers() {
       return false;
     }
 
-    bool occupied = false;
-    for (int item = 0; item < foundCount; item++) {
-      if (foundLocker[item] == locker &&
-          foundStatus[item] != STATUS_DEPOSIT_CANCELLED &&
-          foundStatus[item] != STATUS_PICKED_UP) {
-        occupied = true;
-        break;
-      }
-    }
-    string status = lockerBroken[locker] ? "BROKEN" : (occupied ? "OCCUPIED" : "READY");
+    string status = lockerBroken[locker] ? "BROKEN"
+                                         : (lockerIsOccupied(locker) ? "OCCUPIED"
+                                                                     : "READY");
     if (!databaseExecute("UPDATE lockers SET status = " + databaseQuote(status) +
                          " WHERE id_locker = " + to_string(lockerId))) {
       return false;
@@ -1203,12 +1226,19 @@ bool databaseSaveClaims() {
 
 bool databaseSaveAccessCode(int *codeId, int depositId, int claimId,
                             string type, string code, long expiry,
-                            string inactiveStatus) {
+                            string inactiveStatus,
+                            bool keepActiveWithoutPlaintext, int failedCount) {
   if (code == "") {
     if (*codeId == 0) {
       return true;
     }
-    return databaseExecute("UPDATE access_codes SET status = " +
+    if (keepActiveWithoutPlaintext) {
+      return databaseExecute("UPDATE access_codes SET failed_count = " +
+                             to_string(failedCount) + " WHERE id_code = " +
+                             to_string(*codeId));
+    }
+    return databaseExecute("UPDATE access_codes SET failed_count = " +
+                           to_string(failedCount) + ", status = " +
                            databaseQuote(inactiveStatus) +
                            ", used_at = CASE WHEN " +
                            databaseQuote(inactiveStatus) +
@@ -1222,10 +1252,10 @@ bool databaseSaveAccessCode(int *codeId, int depositId, int claimId,
     string deposit = type == "DEPOSIT" ? to_string(depositId) : "NULL";
     string claim = type == "PICKUP" ? to_string(claimId) : "NULL";
     if (!databaseExecute("INSERT INTO access_codes (id_deposit, id_claim, "
-                         "tipe, code_hash, expires_at) VALUES (" + deposit +
-                         ", " + claim + ", " + databaseQuote(type) +
+                         "tipe, code_hash, expires_at, failed_count) VALUES (" +
+                         deposit + ", " + claim + ", " + databaseQuote(type) +
                          ", SHA2(" + databaseQuote(code) + ", 256), " +
-                         expires + ")")) {
+                         expires + ", " + to_string(failedCount) + ")")) {
       return false;
     }
     *codeId = static_cast<int>(mysql_insert_id(databaseConnection));
@@ -1234,7 +1264,8 @@ bool databaseSaveAccessCode(int *codeId, int depositId, int claimId,
 
   return databaseExecute("UPDATE access_codes SET code_hash = SHA2(" +
                          databaseQuote(code) + ", 256), expires_at = " +
-                         expires + ", failed_count = 0, status = 'ACTIVE', "
+                         expires + ", failed_count = " +
+                         to_string(failedCount) + ", status = 'ACTIVE', "
                          "used_at = NULL WHERE id_code = " +
                          to_string(*codeId));
 }
@@ -1286,13 +1317,21 @@ void saveAll() {
                                 ? "USED"
                                 : (foundStatus[i] == STATUS_PICKUP_LOCKED ? "LOCKED"
                                                                              : "CANCELLED");
+    bool keepDepositCode = databaseDepositCodeId[i] != 0 &&
+                           foundDepositCode[i] == "" &&
+                           foundStatus[i] == STATUS_DEPOSIT_PENDING;
+    bool keepPickupCode = databasePickupCodeId[i] != 0 &&
+                          foundPickupCode[i] == "" &&
+                          foundStatus[i] == STATUS_CLAIM_PENDING;
     saved = databaseSaveAccessCode(&databaseDepositCodeId[i], databaseDepositId[i],
                                    0, "DEPOSIT", foundDepositCode[i],
-                                   foundReservationExpiry[i], depositInactive) &&
+                                   foundReservationExpiry[i], depositInactive,
+                                   keepDepositCode, foundDepositFailed[i]) &&
             databaseSaveAccessCode(&databasePickupCodeId[i], 0,
                                    databaseActiveClaimId[i], "PICKUP",
                                    foundPickupCode[i], foundPickupExpiry[i],
-                                   pickupInactive);
+                                   pickupInactive, keepPickupCode,
+                                   foundPickupFailed[i]);
   }
   saved = saved && databaseSaveLostReports();
 
@@ -1438,6 +1477,7 @@ int addFoundItem(int reporterIndex, string name, string category,
   foundLocker[foundCount] = -1;
   foundDepositCode[foundCount] = "";
   foundReservationExpiry[foundCount] = 0;
+  foundDepositFailed[foundCount] = 0;
   foundClaimant[foundCount] = -1;
   foundPickupCode[foundCount] = "";
   foundPickupExpiry[foundCount] = 0;
@@ -1478,19 +1518,7 @@ int findAvailableLocker() {
     if (lockerBroken[locker]) {
       continue;
     }
-    bool occupied = false;
-
-    for (int i = 0; i < foundCount; i++) {
-      if (foundLocker[i] == locker &&
-          (foundStatus[i] == STATUS_DEPOSIT_PENDING ||
-           foundStatus[i] == STATUS_AVAILABLE ||
-           foundStatus[i] == STATUS_NEEDS_VERIFICATION)) {
-        occupied = true;
-        break;
-      }
-    }
-
-    if (!occupied) {
+    if (!lockerIsOccupied(locker)) {
       return locker;
     }
   }
@@ -1788,6 +1816,7 @@ int submitPickupCode(int claimantIndex, int itemIndex, string code) {
 void showPickupFlow(int claimantIndex, int itemIndex) {
   while (true) {
     string code = trim(readLine("Masukkan kode ambil di loker: "));
+    int failedBefore = foundPickupFailed[itemIndex];
     int result = submitPickupCode(claimantIndex, itemIndex, code);
 
     if (result == PICKUP_EXPIRED) {
@@ -1796,12 +1825,20 @@ void showPickupFlow(int claimantIndex, int itemIndex) {
       return;
     }
     if (result == PICKUP_LOCKED) {
+      if (foundStatus[itemIndex] == STATUS_PICKUP_LOCKED &&
+          foundPickupFailed[itemIndex] > failedBefore) {
+        databaseLogLockerEvent(foundLocker[itemIndex],
+                               databaseDepositId[itemIndex], "PIN_FAILURE",
+                               "Kode ambil salah; pengambilan dikunci.");
+      }
       saveAll();
       cout
           << "Kode ambil terkunci; admin telah diberi penanda verifikasi.\n";
       return;
     }
     if (result == PICKUP_WRONG_CODE) {
+      databaseLogLockerEvent(foundLocker[itemIndex], databaseDepositId[itemIndex],
+                             "PIN_FAILURE", "Kode ambil salah.");
       cout << "Kode salah. Percobaan tersisa: "
                 << MAX_CLAIM_ATTEMPTS - foundPickupFailed[itemIndex] << "\n";
       saveAll();
@@ -1818,18 +1855,24 @@ void showPickupFlow(int claimantIndex, int itemIndex) {
                            1, 3);
 
       if (sensor == 1) {
+        int lockerIndex = foundLocker[itemIndex];
         foundStatus[itemIndex] = STATUS_PICKED_UP;
         foundLocker[itemIndex] = -1;
         clearPickupDetails(itemIndex);
         saveAll();
+        databaseLogLockerEvent(lockerIndex, databaseDepositId[itemIndex], "PICKUP",
+                               "Barang diambil.");
         cout << "[OK] Pengambilan selesai. Loker kembali tersedia.\n";
         return;
       }
       if (sensor == 3) {
+        int lockerIndex = foundLocker[itemIndex];
         foundStatus[itemIndex] = STATUS_NEEDS_VERIFICATION;
         foundPickupCode[itemIndex] = "";
         foundPickupExpiry[itemIndex] = 0;
         saveAll();
+        databaseLogLockerEvent(lockerIndex, databaseDepositId[itemIndex], "ANOMALY",
+                               "Masalah loker dilaporkan saat pengambilan.");
         cout
             << "Anomali tercatat; loker dikunci untuk verifikasi admin.\n";
         return;
@@ -1954,8 +1997,8 @@ void showReportFoundScreen(int userIndex) {
        << " dicadangkan selama 10 menit.\n";
   cout << "Kode titip: " << foundDepositCode[itemIndex] << "\n";
 
-  int failedAttempts = 0;
-  while (failedAttempts < MAX_CLAIM_ATTEMPTS) {
+  while (foundDepositFailed[itemIndex] < MAX_CLAIM_ATTEMPTS) {
+    string code = trim(readLine("Masukkan kode pada keypad loker: "));
     if ((long)time(0) > foundReservationExpiry[itemIndex]) {
       cancelDepositReservation(itemIndex);
       saveAll();
@@ -1964,7 +2007,6 @@ void showReportFoundScreen(int userIndex) {
       return;
     }
 
-    string code = trim(readLine("Masukkan kode pada keypad loker: "));
     if ((foundDepositCode[itemIndex] != "" &&
          code == foundDepositCode[itemIndex]) ||
         databaseAccessCodeMatches(databaseDepositCodeId[itemIndex], code)) {
@@ -1972,14 +2014,17 @@ void showReportFoundScreen(int userIndex) {
       break;
     }
 
-    failedAttempts++;
-    if (failedAttempts < MAX_CLAIM_ATTEMPTS) {
+    databaseLogLockerEvent(foundLocker[itemIndex], databaseDepositId[itemIndex],
+                           "PIN_FAILURE", "Kode titip salah.");
+    foundDepositFailed[itemIndex]++;
+    saveAll();
+    if (foundDepositFailed[itemIndex] < MAX_CLAIM_ATTEMPTS) {
       cout << "Kode salah. Percobaan tersisa: "
-                << MAX_CLAIM_ATTEMPTS - failedAttempts << "\n";
+                << MAX_CLAIM_ATTEMPTS - foundDepositFailed[itemIndex] << "\n";
     }
   }
 
-  if (failedAttempts >= MAX_CLAIM_ATTEMPTS) {
+  if (foundDepositFailed[itemIndex] >= MAX_CLAIM_ATTEMPTS) {
     cancelDepositReservation(itemIndex);
     saveAll();
     cout << "Kode salah tiga kali; reservasi dibatalkan.\n";
@@ -1999,7 +2044,10 @@ void showReportFoundScreen(int userIndex) {
       foundStatus[itemIndex] = STATUS_AVAILABLE;
       foundDepositCode[itemIndex] = "";
       foundReservationExpiry[itemIndex] = 0;
+      foundDepositFailed[itemIndex] = 0;
       saveAll();
+      databaseLogLockerEvent(foundLocker[itemIndex], databaseDepositId[itemIndex],
+                             "DROPOFF", "Barang dititipkan.");
       cout << "[OK] Penitipan selesai. Barang sekarang dapat dicari.\n";
       break;
     }
@@ -2008,7 +2056,10 @@ void showReportFoundScreen(int userIndex) {
       foundStatus[itemIndex] = STATUS_NEEDS_VERIFICATION;
       foundDepositCode[itemIndex] = "";
       foundReservationExpiry[itemIndex] = 0;
+      foundDepositFailed[itemIndex] = 0;
       saveAll();
+      databaseLogLockerEvent(foundLocker[itemIndex], databaseDepositId[itemIndex],
+                             "ANOMALY", "Masalah loker dilaporkan saat penitipan.");
       cout << "Anomali tercatat; loker dikunci untuk verifikasi admin.\n";
       break;
     }
@@ -2060,16 +2111,40 @@ void showReportLostScreen(int userIndex, string prefillName) {
   pauseScreen();
 }
 
-// Shows the active user’s found-item reports.
+void showMyClaimHistory(int userIndex) {
+  MYSQL_RES *result = databaseSelect(
+      "SELECT i.nama_barang, c.status, DATE_FORMAT(c.claimed_at, "
+      "'%Y-%m-%d %H:%i') FROM claims c JOIN items i ON i.id_item = c.id_item "
+      "WHERE c.nim_pengklaim = " + databaseQuote(userName[userIndex]) +
+      " ORDER BY c.claimed_at DESC, c.id_claim DESC");
+  if (result == 0) {
+    cout << "Riwayat klaim tidak dapat dimuat.\n";
+    return;
+  }
+
+  cout << "\nRIWAYAT KLAIM SAYA\n" << UI_DIVIDER << "\n";
+  MYSQL_ROW row;
+  bool hasClaims = false;
+  while ((row = mysql_fetch_row(result)) != 0) {
+    hasClaims = true;
+    cout << "\n" << databaseField(row, 0) << "\n";
+    cout << "Status   : " << databaseField(row, 1) << "\n";
+    cout << "Diajukan : " << databaseField(row, 2) << "\n";
+  }
+  if (!hasClaims) {
+    cout << "Kamu belum memiliki riwayat klaim.\n";
+  }
+  mysql_free_result(result);
+}
+
+// Shows the active user’s found-item reports and claims.
 void showMyReportsScreen(int userIndex) {
   printHeader("Laporan Saya");
 
   int count = listItemsByReporter(userIndex);
-
+  cout << "\nLAPORAN TEMUAN SAYA\n" << UI_DIVIDER << "\n";
   if (count == 0) {
     cout << "Kamu belum memiliki laporan barang temuan.\n";
-    pauseScreen();
-    return;
   }
 
   for (int i = 0; i < searchResultCount; i++) {
@@ -2082,6 +2157,7 @@ void showMyReportsScreen(int userIndex) {
     cout << "Status   : " << foundStatus[index] << "\n";
   }
 
+  showMyClaimHistory(userIndex);
   pauseScreen();
 }
 
@@ -2195,6 +2271,27 @@ void showClaimFlowScreen(int userIndex) {
   pauseScreen();
 }
 
+int showBlockedClaims() {
+  int blockedCount = 0;
+  cout << "\nKLAIM DIBLOKIR\n" << UI_DIVIDER << "\n";
+  for (int i = 0; i < claimCount; i++) {
+    if (claimFailed[i] < MAX_CLAIM_ATTEMPTS) {
+      continue;
+    }
+
+    int itemIndex = claimItem[i];
+    int claimantIndex = claimUser[i];
+    cout << "  [" << i + 1 << "] " << foundName[itemIndex]
+         << "\n      Pengklaim: " << userFullName[claimantIndex] << " ("
+         << userName[claimantIndex] << ")\n";
+    blockedCount++;
+  }
+  if (blockedCount == 0) {
+    cout << "Tidak ada klaim diblokir.\n";
+  }
+  return blockedCount;
+}
+
 // Runs the terminal admin anomaly and locker workflow.
 void showAdminMenu() {
   bool active = true;
@@ -2202,9 +2299,10 @@ void showAdminMenu() {
     printHeader("MENU ADMIN");
     cout << "  1. Lihat anomali\n";
     cout << "  2. Tangani barang\n";
-    cout << "  3. Status loker\n";
-    cout << "  4. Logout\n" << UI_DIVIDER << "\n";
-    int choice = readInt("Pilih menu [1-4]: ", 1, 4);
+    cout << "  3. Tangani klaim diblokir\n";
+    cout << "  4. Status loker\n";
+    cout << "  5. Logout\n" << UI_DIVIDER << "\n";
+    int choice = readInt("Pilih menu [1-5]: ", 1, 5);
     if (choice == 1) {
       bool found = false;
       for (int i = 0; i < foundCount; i++) {
@@ -2258,10 +2356,48 @@ void showAdminMenu() {
       }
       pauseScreen();
     } else if (choice == 3) {
+      if (showBlockedClaims() == 0) {
+        pauseScreen();
+        continue;
+      }
+
+      int claim = toIndex(readInt("Nomor klaim diblokir: ", 1, claimCount));
+      if (claimFailed[claim] < MAX_CLAIM_ATTEMPTS) {
+        cout << "Klaim tersebut tidak diblokir.\n";
+        pauseScreen();
+        continue;
+      }
+
+      int item = claimItem[claim];
+      int verified = readInt("Pemilik terverifikasi?\n1. Ya, kode ambil baru\n2. "
+                             "Tidak, tolak klaim\nPilih: ",
+                             1, 2);
+      if (verified == 1) {
+        if (foundStatus[item] != STATUS_AVAILABLE) {
+          cout << "Barang tidak lagi tersedia untuk diklaim.\n";
+          pauseScreen();
+          continue;
+        }
+        foundStatus[item] = STATUS_CLAIM_PENDING;
+        foundClaimant[item] = claimUser[claim];
+        foundPickupCode[item] = makePickupCode();
+        foundPickupExpiry[item] = (long)time(0) + 24 * 60 * 60;
+        foundPickupFailed[item] = 0;
+        claimFailed[claim] = 0;
+        saveAll();
+        cout << "Kode ambil baru: " << foundPickupCode[item] << "\n";
+      } else {
+        claimFailed[claim] = 0;
+        saveAll();
+        cout << "Klaim ditolak dan dicatat.\n";
+      }
+      pauseScreen();
+    } else if (choice == 4) {
       cout << "\nLOKER 3 x 3\n" << UI_DIVIDER << "\n";
       for (int i = 0; i < MAX_LOCKERS; i++) {
-        cout << "  " << lockerLabel(i) << " ["
-             << (lockerBroken[i] ? "RUSAK" : " SIAP") << "]";
+        string status = lockerBroken[i] ? "DEFECTIVE"
+                                         : (lockerIsOccupied(i) ? "FULL" : "READY");
+        cout << "  " << lockerLabel(i) << " [" << status << "]";
         if (i % 3 == 2) {
           cout << "\n";
         }

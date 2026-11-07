@@ -20,6 +20,16 @@ proc s {text {pause 0.8}} {
   hold $pause
 }
 
+proc submitBlockedClaim {} {
+  s 2
+  s ""
+  s 0
+  s ""
+  s 2
+  s "detail salah"
+  s ""
+}
+
 set project [file normalize [file dirname [info script]]]
 set binary "$project/lostfound"
 foreach variable {DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD} {
@@ -41,6 +51,7 @@ if {![file executable $binary]} {
   }
 }
 
+# shortcut: assumes a fresh database with only seeded demo data; use a temporary demo database for repeatable runs.
 set workspace "/tmp/lostfound-demo-[pid]"
 file delete -force $workspace
 file mkdir $workspace
@@ -58,7 +69,7 @@ s 08123456789
 s demo123
 s ""
 
-# Deposit a found item with the canonical category selector.
+# Deposit a found item, including one failed PIN attempt.
 s 2
 s 240001
 s demo123
@@ -74,12 +85,13 @@ expect -re {Kode titip: ([0-9]+)} {
   set depositCode $expect_out(1,string)
 }
 hold 1
+s 000000
 s $depositCode
 s 1
 s ""
 s 4
 
-# Arya claims and picks up the new item using its one-time pickup code.
+# Arya claims and picks up the new item, including one failed PIN attempt.
 s 2
 s Arya
 s Arya123
@@ -93,17 +105,59 @@ expect -re {Kode ambil berlaku 24 jam: ([0-9]+)} {
   set pickupCode $expect_out(1,string)
 }
 hold 1
+s 000000
 s $pickupCode
 s 1
 s ""
+s 3
+s ""
 s 4
 
-# Show the final locker state through the admin menu, then exit.
+# Create a locker anomaly so the admin can mark it defective.
+s 2
+s 240001
+s demo123
+s 1
+s "Loker Rusak Demo"
+s 5
+s "Laboratorium Komputer"
+s [clock format [clock seconds] -format "%Y-%m-%d"]
+s "loker-rusak-demo.jpg"
+s ""
+s "Stiker biru"
+expect -re {Kode titip: ([0-9]+)} {
+  set anomalyCode $expect_out(1,string)
+}
+hold 1
+s $anomalyCode
+s 3
+s ""
+s 4
+
+# Block Azhri's claim for Arya's demo wallet after three wrong secret details.
+s 2
+s Azhri
+s Azhri123
+submitBlockedClaim
+submitBlockedClaim
+submitBlockedClaim
+s 4
+
+# Admin approves the blocked claim, marks the anomalous locker defective,
+# then shows the READY, FULL, and DEFECTIVE locker states.
 s 2
 s admin
 s admin123
 s 3
+s 1
+s 1
+s ""
+s 2
+s 4
+s 2
 s ""
 s 4
+s ""
+s 5
 s 3
 expect eof
