@@ -1,0 +1,98 @@
+#!/usr/bin/expect -f
+
+proc wait {ms} {
+  set ::tick 0
+  after $ms {set ::tick 1}
+  vwait ::tick
+}
+
+proc hold {secs} {
+  wait [expr {int($secs * 1000)}]
+}
+
+proc s {text {pause 0.8}} {
+  foreach c [split $text ""] {
+    send -- $c
+    wait [expr {int(45 + rand() * 85)}]
+  }
+  wait 200
+  send -- "\r"
+  hold $pause
+}
+
+set project [file normalize [file dirname [info script]]]
+set binary "$project/lostfound"
+if {![file executable $binary]} {
+  puts "Membangun lostfound..."
+  if {[catch {exec g++ -std=c++11 -Wall -Wextra "$project/src/main.cpp" -o $binary} message]} {
+    puts stderr $message
+    exit 1
+  }
+}
+
+set workspace "/tmp/lostfound-demo-[pid]"
+file delete -force $workspace
+file mkdir $workspace
+spawn sh -c "cd '$workspace' && exec '$binary'"
+log_user 1
+hold 2
+
+# Register a student through the guided major selector.
+s 1
+s 240001
+s "Demo Mahasiswa"
+s 1
+s "demo@example.com"
+s 08123456789
+s demo123
+s ""
+
+# Deposit a found item with the canonical category selector.
+s 2
+s 240001
+s demo123
+s 1
+s "Kunci Demo"
+s 5
+s "Laboratorium Komputer"
+s [clock format [clock seconds] -format "%Y-%m-%d"]
+s "kunci-demo.jpg"
+s "Kunci logam dengan beberapa anak kunci"
+s "Gantungan merah"
+expect -re {Kode titip: ([0-9]+)} {
+  set depositCode $expect_out(1,string)
+}
+hold 1
+s $depositCode
+s 1
+s ""
+s 4
+
+# Arya claims and picks up the new item using its one-time pickup code.
+s 2
+s Arya
+s Arya123
+s 2
+s ""
+s 0
+s ""
+s 3
+s "Gantungan merah"
+expect -re {Kode ambil berlaku 24 jam: ([0-9]+)} {
+  set pickupCode $expect_out(1,string)
+}
+hold 1
+s $pickupCode
+s 1
+s ""
+s 4
+
+# Show the final locker state through the admin menu, then exit.
+s 2
+s admin
+s admin123
+s 3
+s ""
+s 4
+s 3
+expect eof
