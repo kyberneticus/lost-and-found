@@ -5,6 +5,7 @@ config:
     curve: stepAfter
 ---
 
+```mermaid
 flowchart TD
 
     %% ==========================
@@ -145,3 +146,4 @@ flowchart TD
     style AMBIL fill:#ffffff,stroke:#000000,color:#000000,stroke-width:1px
     style RIWAYAT fill:#ffffff,stroke:#000000,color:#000000,stroke-width:1px
     style ADMIN fill:#ffffff,stroke:#000000,color:#000000,stroke-width:1px
+```

@@ -15,6 +15,15 @@ const int MAX_LOCKERS = 9;
 const int MAX_LOGIN_ATTEMPTS = 3;
 const int MAX_CLAIM_ATTEMPTS = 3;
 const int MIN_PASSWORD_LENGTH = 6;
+const std::string UI_BORDER(54, '=');
+const std::string UI_DIVIDER(54, '-');
+const int CATEGORY_COUNT = 6;
+const std::string CATEGORIES[CATEGORY_COUNT] = {
+    "Aksesori", "Dokumen", "Dompet", "Elektronik", "Kunci", "Pakaian"};
+const int MAJOR_COUNT = 6;
+const std::string MAJORS[MAJOR_COUNT] = {
+    "Informatika", "Sistem Informasi", "Teknik Komputer",
+    "Teknik Elektro", "Manajemen", "Akuntansi"};
 
 const std::string STATUS_AVAILABLE = "Tersedia";
 const std::string STATUS_RETURNED = "Dikembalikan";
@@ -458,13 +467,52 @@ int readInt(std::string prompt, int minValue, int maxValue) {
 }
 
 // Waits for Enter before returning to a menu.
-void pauseScreen() { readLine("Tekan Enter untuk lanjut..."); }
+void pauseScreen() {
+  cout << "\n" << UI_DIVIDER << "\n[ Tekan Enter untuk lanjut ]";
+  readLine("");
+  cout << "\n";
+}
 
 // Prints a consistent terminal screen heading.
 void printHeader(std::string title) {
-  std::cout << "\n==============================\n";
-  std::cout << title << "\n";
-  std::cout << "==============================\n";
+  cout << "\n" << UI_BORDER << "\n";
+  cout << "                 LOST & FOUND LOCKER\n";
+  cout << UI_BORDER << "\n";
+  cout << "  " << title << "\n" << UI_DIVIDER << "\n";
+}
+
+// Lets the user select one canonical item category.
+std::string selectCategory(bool allowAll) {
+  cout << "\nKATEGORI\n" << UI_DIVIDER << "\n";
+  if (allowAll) {
+    cout << "  0. Semua kategori\n";
+  }
+  for (int i = 0; i < CATEGORY_COUNT; i++) {
+    cout << "  " << i + 1 << ". " << CATEGORIES[i] << "\n";
+  }
+  cout << UI_DIVIDER << "\n";
+
+  int choice = readInt("Pilih kategori [" +
+                           std::to_string(allowAll ? 0 : 1) + "-" +
+                           std::to_string(CATEGORY_COUNT) + "]: ",
+                       allowAll ? 0 : 1, CATEGORY_COUNT);
+  if (choice == 0) {
+    return "";
+  }
+  return CATEGORIES[choice - 1];
+}
+
+// Lets the user select one canonical study major.
+std::string selectMajor() {
+  cout << "\nJURUSAN\n" << UI_DIVIDER << "\n";
+  for (int i = 0; i < MAJOR_COUNT; i++) {
+    cout << "  " << i + 1 << ". " << MAJORS[i] << "\n";
+  }
+  cout << UI_DIVIDER << "\n";
+  int choice = readInt("Pilih jurusan [1-" + std::to_string(MAJOR_COUNT) +
+                           "]: ",
+                       1, MAJOR_COUNT);
+  return MAJORS[choice - 1];
 }
 
 // Loads persisted users, lockers, items, reports, and claims.
@@ -1318,7 +1366,7 @@ void showRegisterScreen() {
 
   std::string nim = trim(readLine("NIM: "));
   std::string fullName = trim(readLine("Nama lengkap: "));
-  std::string major = trim(readLine("Jurusan: "));
+  std::string major = selectMajor();
   std::string email = trim(readLine("Email: "));
   std::string phone = trim(readLine("Nomor telepon: "));
   std::string password = readLine("Password (min 6 karakter): ");
@@ -1384,7 +1432,7 @@ void showReportFoundScreen(int userIndex) {
   printHeader("Titip Barang");
 
   std::string name = readLine("Nama barang: ");
-  std::string category = readLine("Kategori: ");
+  std::string category = selectCategory(false);
   std::string location = readLine("Lokasi ditemukan: ");
   std::string date = readLine("Tanggal (YYYY-MM-DD): ");
   std::string photo = trim(readLine("Path foto wajib: "));
@@ -1507,7 +1555,7 @@ void showReportLostScreen(int userIndex, std::string prefillName) {
     name = readLine("Nama barang: ");
   }
 
-  std::string category = readLine("Kategori: ");
+  std::string category = selectCategory(false);
   std::string location = readLine("Lokasi hilang: ");
   std::string date = readLine("Tanggal hilang (YYYY-MM-DD): ");
   std::string description = readLine("Deskripsi (boleh kosong): ");
@@ -1548,8 +1596,8 @@ void showMyReportsScreen(int userIndex) {
   for (int i = 0; i < searchResultCount; i++) {
     int index = searchResult[i];
 
-    std::cout << "\nNomor    : " << toDisplayNo(index) << "\n";
-    std::cout << "Nama     : " << foundName[index] << "\n";
+    std::cout << "\n[" << toDisplayNo(index) << "] " << foundName[index]
+              << "\n" << UI_DIVIDER << "\n";
     std::cout << "Lokasi   : " << foundLocation[index] << "\n";
     std::cout << "Tanggal  : " << foundDate[index] << "\n";
     std::cout << "Status   : " << foundStatus[index] << "\n";
@@ -1563,7 +1611,7 @@ void showClaimFlowScreen(int userIndex) {
   printHeader("Cari dan Klaim Barang");
 
   std::string keyword = readLine("Nama atau deskripsi barang: ");
-  std::string category = readLine("Kategori barang: ");
+  std::string category = selectCategory(true);
   std::string location = readLine("Lokasi ditemukan: ");
 
   int resultCount = searchAvailableItems(keyword, category, location);
@@ -1583,7 +1631,7 @@ void showClaimFlowScreen(int userIndex) {
     return;
   }
 
-  std::cout << "\n=== Daftar Barang Ditemukan ===\n";
+  std::cout << "\nDAFTAR BARANG DITEMUKAN\n" << UI_DIVIDER << "\n";
 
   int maxDisplayNo = 0;
 
@@ -1591,8 +1639,8 @@ void showClaimFlowScreen(int userIndex) {
     int index = searchResult[i];
     int displayNo = toDisplayNo(index);
 
-    std::cout << "\nNomor    : " << displayNo << "\n";
-    std::cout << "Nama       : " << foundName[index] << "\n";
+    std::cout << "\n[" << displayNo << "] " << foundName[index] << "\n"
+              << UI_DIVIDER << "\n";
     std::cout << "Kategori   : " << foundCategory[index] << "\n";
     std::cout << "Lokasi     : " << foundLocation[index] << "\n";
     std::cout << "Tanggal    : " << foundDate[index] << "\n";
@@ -1672,10 +1720,12 @@ void showClaimFlowScreen(int userIndex) {
 void showAdminMenu() {
   bool active = true;
   while (active) {
-    printHeader("Menu Admin");
-    int choice = readInt("1. Lihat anomali\n2. Tangani barang\n3. Status "
-                         "loker\n4. Logout\nPilih: ",
-                         1, 4);
+    printHeader("MENU ADMIN");
+    cout << "  1. Lihat anomali\n";
+    cout << "  2. Tangani barang\n";
+    cout << "  3. Status loker\n";
+    cout << "  4. Logout\n" << UI_DIVIDER << "\n";
+    int choice = readInt("Pilih menu [1-4]: ", 1, 4);
     if (choice == 1) {
       bool found = false;
       for (int i = 0; i < foundCount; i++) {
@@ -1683,8 +1733,8 @@ void showAdminMenu() {
             foundStatus[i] == STATUS_PICKUP_LOCKED ||
             (foundStatus[i] == STATUS_AVAILABLE &&
              isUnclaimedFor30Days(foundDate[i]))) {
-          std::cout << toDisplayNo(i) << ". " << foundName[i] << " - "
-                    << foundStatus[i] << "\n";
+          std::cout << "  [" << toDisplayNo(i) << "] " << foundName[i]
+                    << "\n      Status: " << foundStatus[i] << "\n";
           found = true;
         }
       }
@@ -1729,9 +1779,14 @@ void showAdminMenu() {
       }
       pauseScreen();
     } else if (choice == 3) {
-      for (int i = 0; i < MAX_LOCKERS; i++)
-        std::cout << lockerLabel(i) << ": "
-                  << (lockerBroken[i] ? "Rusak" : "Siap") << "\n";
+      cout << "\nLOKER 3 x 3\n" << UI_DIVIDER << "\n";
+      for (int i = 0; i < MAX_LOCKERS; i++) {
+        cout << "  " << lockerLabel(i) << " ["
+             << (lockerBroken[i] ? "RUSAK" : " SIAP") << "]";
+        if (i % 3 == 2) {
+          cout << "\n";
+        }
+      }
       pauseScreen();
     } else {
       active = false;
@@ -1749,9 +1804,11 @@ int main() {
 
   bool isRunning = true;
   while (isRunning) {
-    printHeader("Lost and Found Management System");
-    int guestChoice =
-        readInt("1. Register\n2. Login\n3. Keluar\nPilih: ", 1, 3);
+    printHeader("MAIN MENU");
+    cout << "  1. Register mahasiswa\n";
+    cout << "  2. Login\n";
+    cout << "  3. Keluar\n" << UI_DIVIDER << "\n";
+    int guestChoice = readInt("Pilih menu [1-3]: ", 1, 3);
 
     if (guestChoice == 1) {
       showRegisterScreen();
@@ -1762,10 +1819,12 @@ int main() {
         userIndex = -1;
       }
       while (userIndex >= 0) {
-        printHeader("Menu Pengguna");
-        int userChoice = readInt("1. Titip barang\n2. Klaim barang\n3. Laporan "
-                                 "saya\n4. Logout\nPilih: ",
-                                 1, 4);
+        printHeader("MENU MAHASISWA");
+        cout << "  1. Titip barang\n";
+        cout << "  2. Cari dan klaim barang\n";
+        cout << "  3. Riwayat saya\n";
+        cout << "  4. Logout\n" << UI_DIVIDER << "\n";
+        int userChoice = readInt("Pilih menu [1-4]: ", 1, 4);
         if (userChoice == 1) {
           showReportFoundScreen(userIndex);
         } else if (userChoice == 2) {
