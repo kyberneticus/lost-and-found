@@ -1,0 +1,30 @@
+#!/usr/bin/expect -f
+source [file join [file dirname [info script]] lib.exp]
+
+prepareTest
+startApp
+
+set suffix [pid]
+set nim "75$suffix"
+set password "test123"
+set missingItem "Tidak Ada $suffix"
+registerStudent $nim "Test Pelapor $suffix" 3 "lost-$suffix@example.test" "085$suffix" $password
+loginStudent $nim $password
+
+# A failed search branches into creation of a lost-item report.
+sendLine 2
+sendLine $missingItem
+sendLine 0
+sendLine ""
+expectText {Barang tidak ditemukan}
+sendLine 1
+sendLine ""
+sendLine 5
+sendLine "Gedung Test"
+sendLine [clock format [clock seconds] -format "%Y-%m-%d"]
+sendLine "Laporan kehilangan dari test"
+expectText {Laporan barang hilang berhasil disimpan!}
+sendLine ""
+
+logoutStudent
+exitApp

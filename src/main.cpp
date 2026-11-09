@@ -14,6 +14,7 @@ const int MAX_LOST = 200;
 const int MAX_CLAIMS = 400;
 const int MAX_LOCKERS = 9;
 const int MAX_LOGIN_ATTEMPTS = 3;
+const int LOGIN_LOCK_DURATION_SECONDS = 15 * 60;
 const int MAX_CLAIM_ATTEMPTS = 3;
 const int MIN_PASSWORD_LENGTH = 6;
 const string UI_BORDER(54, '=');
@@ -75,6 +76,7 @@ string userName[MAX_USERS], userPassword[MAX_USERS], userPhone[MAX_USERS],
     userRole[MAX_USERS];
 int userFailed[MAX_USERS];
 bool userLocked[MAX_USERS];
+long userLockedUntil[MAX_USERS];
 int userCount = 0;
 
 int foundReporter[MAX_FOUND];
@@ -124,6 +126,7 @@ void loadDemoData() {
   userEmail[0] = "azhri@example.com";
   userFailed[0] = 0;
   userLocked[0] = false;
+  userLockedUntil[0] = 0;
   userRole[0] = ROLE_STUDENT;
 
   userName[1] = "Arya";
@@ -134,6 +137,7 @@ void loadDemoData() {
   userEmail[1] = "arya@example.com";
   userFailed[1] = 0;
   userLocked[1] = false;
+  userLockedUntil[1] = 0;
   userRole[1] = ROLE_STUDENT;
 
   const string demoDate = getTodayDate();
@@ -199,6 +203,7 @@ void ensureDemoAdmin() {
   userEmail[userCount] = "";
   userFailed[userCount] = 0;
   userLocked[userCount] = false;
+  userLockedUntil[userCount] = 0;
   userRole[userCount] = ROLE_ADMIN;
   userCount++;
 }
@@ -723,7 +728,7 @@ bool databaseAccessCodeMatches(int codeId, string code) {
 bool databaseLoadUsers() {
   MYSQL_RES *result = databaseSelect(
       "SELECT nim, no_hp, nama, jurusan, email, role, failed_login, "
-      "locked_until IS NOT NULL FROM users ORDER BY nim");
+      "UNIX_TIMESTAMP(locked_until) FROM users ORDER BY nim");
   if (result == 0) {
     return false;
   }
@@ -738,7 +743,11 @@ bool databaseLoadUsers() {
     userEmail[userCount] = databaseField(row, 4);
     userRole[userCount] = databaseField(row, 5);
     userFailed[userCount] = static_cast<int>(databaseNumber(row[6]));
-    userLocked[userCount] = databaseNumber(row[7]) != 0;
+    userLockedUntil[userCount] = databaseNumber(row[7]);
+    userLocked[userCount] = userLockedUntil[userCount] > time(0);
+    if (!userLocked[userCount]) {
+      userLockedUntil[userCount] = 0;
+    }
     databaseUserStored[userCount] = true;
     userCount++;
   }
@@ -1014,7 +1023,9 @@ string databaseClaimStatus(int itemIndex) {
 
 bool databaseSaveUsers() {
   for (int i = 0; i < userCount; i++) {
-    string lockedUntil = userLocked[i] ? "'9999-12-31 23:59:59'" : "NULL";
+    string lockedUntil = userLocked[i]
+                             ? "FROM_UNIXTIME(" + to_string(userLockedUntil[i]) + ")"
+                             : "NULL";
     string query;
     if (!databaseUserStored[i]) {
       query = "INSERT INTO users (nim, nama, jurusan, email, no_hp, "
@@ -1383,6 +1394,7 @@ int registerUser(string username, string password,
   userPhone[userCount] = phone;
   userFailed[userCount] = 0;
   userLocked[userCount] = false;
+  userLockedUntil[userCount] = 0;
 
   userCount++;
 
@@ -1424,8 +1436,15 @@ int loginUser(string username, string password) {
   if (index == -1)
     return LOGIN_NOT_FOUND;
 
-  if (userLocked[index] == true)
-    return LOGIN_LOCKED;
+  long now = (long)time(0);
+  if (userLocked[index]) {
+    if (now < userLockedUntil[index]) {
+      return LOGIN_LOCKED;
+    }
+    userLocked[index] = false;
+    userLockedUntil[index] = 0;
+    userFailed[index] = 0;
+  }
 
   if (databasePasswordMatches(userName[index], password)) {
     userFailed[index] = 0;
@@ -1436,6 +1455,7 @@ int loginUser(string username, string password) {
 
   if (userFailed[index] >= MAX_LOGIN_ATTEMPTS) {
     userLocked[index] = true;
+    userLockedUntil[index] = now + LOGIN_LOCK_DURATION_SECONDS;
     return LOGIN_LOCKED;
   } else {
     return LOGIN_WRONG_PASSWORD;
@@ -1815,7 +1835,10 @@ int submitPickupCode(int claimantIndex, int itemIndex, string code) {
 // Runs the terminal pickup and locker-sensor simulation.
 void showPickupFlow(int claimantIndex, int itemIndex) {
   while (true) {
-    string code = trim(readLine("Masukkan kode ambil di loker: "));
+    string code = trim(readLine("Masukkan kode ambil di loker (0 untuk kembali): "));
+    if (code == "0") {
+      return;
+    }
     int failedBefore = foundPickupFailed[itemIndex];
     int result = submitPickupCode(claimantIndex, itemIndex, code);
 
@@ -1938,7 +1961,7 @@ int showLoginScreen() {
     cout << "Password salah.\n";
     saveAll();
   } else if (result == LOGIN_LOCKED) {
-    cout << "Akun terkunci karena terlalu banyak percobaan gagal.\n";
+    cout << "Akun terkunci selama 15 menit karena terlalu banyak percobaan gagal.\n";
     saveAll();
   } else {
     cout << "Terjadi kesalahan yang tidak diketahui.\n";
@@ -2165,6 +2188,41 @@ void showMyReportsScreen(int userIndex) {
 void showClaimFlowScreen(int userIndex) {
   printHeader("Cari dan Klaim Barang");
 
+  int pendingClaimCount = 0;
+  for (int i = 0; i < foundCount; i++) {
+    if (foundStatus[i] == STATUS_CLAIM_PENDING &&
+        foundClaimant[i] == userIndex) {
+      pendingClaimCount++;
+    }
+  }
+
+  if (pendingClaimCount > 0) {
+    cout << "\nKLAIM DISETUJUI BELUM DIAMBIL\n" << UI_DIVIDER << "\n";
+    for (int i = 0; i < foundCount; i++) {
+      if (foundStatus[i] == STATUS_CLAIM_PENDING &&
+          foundClaimant[i] == userIndex) {
+        cout << "  [" << toDisplayNo(i) << "] " << foundName[i] << "\n";
+      }
+    }
+
+    int choice = readInt("1. Cari dan klaim barang baru\n"
+                         "2. Ambil barang\n"
+                         "Pilih: ",
+                         1, 2);
+    if (choice == 2) {
+      int displayNo = readInt("Nomor barang yang akan diambil: ", 1, foundCount);
+      int itemIndex = toIndex(displayNo);
+      if (foundStatus[itemIndex] != STATUS_CLAIM_PENDING ||
+          foundClaimant[itemIndex] != userIndex) {
+        cout << "Barang tersebut tidak memiliki klaim aktifmu.\n";
+        pauseScreen();
+        return;
+      }
+      showPickupFlow(userIndex, itemIndex);
+      return;
+    }
+  }
+
   string keyword = readLine("Nama atau deskripsi barang: ");
   string category = selectCategory(true);
   string location = readLine("Lokasi ditemukan: ");
@@ -2222,6 +2280,16 @@ void showClaimFlowScreen(int userIndex) {
 
   if (!isFound) {
     cout << "\nNomor barang tidak tersedia dalam hasil pencarian.\n";
+    pauseScreen();
+    return;
+  }
+  if (foundReporter[itemIndex] == userIndex) {
+    cout << "\nKamu tidak dapat mengklaim barang temuanmu sendiri.\n";
+    pauseScreen();
+    return;
+  }
+  if (getFailedClaimCount(itemIndex, userIndex) >= MAX_CLAIM_ATTEMPTS) {
+    cout << "\nKamu sudah mencapai batas percobaan klaim; hubungi admin.\n";
     pauseScreen();
     return;
   }
@@ -2340,6 +2408,7 @@ void showAdminMenu() {
             "1. Reset: barang tersedia\n2. Tandai loker rusak\nPilih: ", 1, 2);
         if (action == 1) {
           foundStatus[item] = STATUS_AVAILABLE;
+          clearPickupDetails(item);
         } else if (foundLocker[item] >= 0) {
           lockerBroken[foundLocker[item]] = true;
         }

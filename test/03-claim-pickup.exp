@@ -1,0 +1,66 @@
+#!/usr/bin/expect -f
+source [file join [file dirname [info script]] lib.exp]
+
+prepareTest
+startApp
+
+set suffix [pid]
+set reporter "73$suffix"
+set claimant "74$suffix"
+set password "test123"
+set item "Test Klaim $suffix"
+set secret "detail klaim $suffix"
+
+# A finder deposits a new, searchable item.
+registerStudent $reporter "Test Penemu $suffix" 1 "finder-$suffix@example.test" "083$suffix" $password
+loginStudent $reporter $password
+depositItem $item 3 "Parkiran Test" "Dompet untuk test klaim" $secret 1
+logoutStudent
+
+# A different student searches, claims, and picks it up.
+registerStudent $claimant "Test Pengklaim $suffix" 2 "claimant-$suffix@example.test" "084$suffix" $password
+loginStudent $claimant $password
+sendLine 2
+sendLine $item
+sendLine 0
+sendLine ""
+expect {
+  -re "\\[([0-9]+)\\] $item" { set itemNumber $expect_out(1,string) }
+  timeout {
+    puts stderr "Barang test tidak muncul dalam hasil pencarian."
+    exit 1
+  }
+}
+sendLine $itemNumber
+sendLine $secret
+expect {
+  -re {Kode ambil berlaku 24 jam: ([0-9]+)} { set pickupCode $expect_out(1,string) }
+  timeout {
+    puts stderr "Kode ambil tidak ditampilkan."
+    exit 1
+  }
+}
+# Leave the first pickup screen without consuming an attempt, then resume
+# the approved claim through the KA/KB branch.
+sendLine 0
+sendLine ""
+sendLine 2
+expect {
+  -re "\\[([0-9]+)\\] $item" { set pendingItemNumber $expect_out(1,string) }
+  timeout {
+    puts stderr "Klaim aktif tidak muncul untuk pengambilan ulang."
+    exit 1
+  }
+}
+sendLine 2
+sendLine $pendingItemNumber
+sendLine 000000
+expectText {Kode salah\. Percobaan tersisa: 2}
+sendLine $pickupCode
+expectText {\[OK\] Pintu loker terbuka\.}
+sendLine 1
+expectText {\[OK\] Pengambilan selesai\. Loker kembali tersedia\.}
+sendLine ""
+
+logoutStudent
+exitApp
