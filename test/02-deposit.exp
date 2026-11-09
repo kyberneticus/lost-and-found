@@ -1,0 +1,18 @@
+#!/usr/bin/expect -f
+source [file join [file dirname [info script]] lib.exp]
+
+prepareTest
+startApp
+
+set suffix [pid]
+set nim "72$suffix"
+set password "test123"
+set item "Test Titip $suffix"
+registerStudent $nim "Test Penitip $suffix" 1 "deposit-$suffix@example.test" "082$suffix" $password
+loginStudent $nim $password
+
+# Covers reservation, one wrong locker PIN, a valid PIN, and confirmed drop-off.
+depositItem $item 5 "Laboratorium Test" "Kunci untuk test penitipan" "gantungan test $suffix" 1
+
+logoutStudent
+exitApp

@@ -1,0 +1,126 @@
+# Shared Expect helpers for the flowchart demos.
+
+set testDir [file normalize [file dirname [info script]]]
+set project [file normalize "$testDir/.."]
+set binary "$project/build/lostfound-test"
+
+proc sendLine {text {pause 120}} {
+  send -- "$text\r"
+  after $pause
+}
+
+proc expectText {pattern} {
+  expect {
+    -re $pattern { return }
+    timeout {
+      puts stderr "Expected output not found: $pattern"
+      exit 1
+    }
+    eof {
+      puts stderr "Application ended before expected output: $pattern"
+      exit 1
+    }
+  }
+}
+
+proc prepareTest {} {
+  global project binary env
+
+  foreach variable {DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD} {
+    if {![info exists env($variable)]} {
+      puts stderr "Atur $variable sebelum menjalankan test."
+      exit 1
+    }
+  }
+  if {![info exists env(ALLOW_MUTATING_TEST_DATABASE)] ||
+      $env(ALLOW_MUTATING_TEST_DATABASE) ne "1"} {
+    puts stderr "Set ALLOW_MUTATING_TEST_DATABASE=1 untuk menjalankan test pada database uji khusus."
+    exit 1
+  }
+
+  file mkdir "$project/build"
+  set buildCommand [list g++ -std=c++11 -Wall -Wextra "$project/src/main.cpp"]
+  foreach flag [split [exec mariadb_config --cflags --libs]] {
+    lappend buildCommand $flag
+  }
+  lappend buildCommand -o $binary
+  if {[catch {eval exec $buildCommand} message]} {
+    puts stderr $message
+    exit 1
+  }
+}
+
+proc startApp {} {
+  global binary
+
+  set workspace "/tmp/lostfound-test-[pid]-[clock microseconds]"
+  file delete -force $workspace
+  file mkdir $workspace
+  spawn sh -c "cd '$workspace' && exec '$binary'"
+  log_user 1
+  after 250
+}
+
+proc registerStudent {nim fullName major email phone password} {
+  sendLine 1
+  sendLine $nim
+  sendLine $fullName
+  sendLine $major
+  sendLine $email
+  sendLine $phone
+  sendLine $password
+  expectText {Registrasi berhasil! Silakan login\.}
+  sendLine ""
+}
+
+proc loginStudent {nim password} {
+  sendLine 2
+  sendLine $nim
+  sendLine $password
+  expectText "Selamat datang, $nim!"
+}
+
+proc logoutStudent {} {
+  sendLine 4
+  expectText {MAIN MENU}
+}
+
+proc exitApp {} {
+  sendLine 3 0
+  expect eof
+}
+
+proc depositItem {name category location description secret sensor} {
+  sendLine 1
+  sendLine $name
+  sendLine $category
+  sendLine $location
+  sendLine [clock format [clock seconds] -format "%Y-%m-%d"]
+  sendLine "test-$name.jpg"
+  sendLine $description
+  sendLine $secret
+
+  expect {
+    -re {Kode titip: ([0-9]+)} { set depositCode $expect_out(1,string) }
+    timeout {
+      puts stderr "Kode titip tidak ditampilkan."
+      exit 1
+    }
+    eof {
+      puts stderr "Aplikasi berhenti sebelum kode titip ditampilkan."
+      exit 1
+    }
+  }
+
+  sendLine 000000
+  expectText {Kode salah\. Percobaan tersisa: 2}
+  sendLine $depositCode
+  expectText {\[OK\] Pintu loker terbuka\.}
+  sendLine $sensor
+  if {$sensor == 1} {
+    expectText {\[OK\] Penitipan selesai\. Barang sekarang dapat dicari\.}
+  } else {
+    expectText {Anomali tercatat; loker dikunci untuk verifikasi admin\.}
+  }
+  sendLine ""
+}

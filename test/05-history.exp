@@ -1,0 +1,23 @@
+#!/usr/bin/expect -f
+source [file join [file dirname [info script]] lib.exp]
+
+prepareTest
+startApp
+
+set suffix [pid]
+set nim "76$suffix"
+set password "test123"
+set item "Test Riwayat $suffix"
+registerStudent $nim "Test Riwayat $suffix" 4 "history-$suffix@example.test" "086$suffix" $password
+loginStudent $nim $password
+depositItem $item 4 "Ruang Test" "Elektronik untuk riwayat" "detail riwayat $suffix" 1
+
+# The deposited item appears in the current student's report history.
+sendLine 3
+expectText {LAPORAN TEMUAN SAYA}
+expectText $item
+expectText {Status   : Tersedia}
+sendLine ""
+
+logoutStudent
+exitApp

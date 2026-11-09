@@ -1,0 +1,137 @@
+#!/usr/bin/expect -f
+source [file join [file dirname [info script]] lib.exp]
+
+prepareTest
+startApp
+
+set suffix [pid]
+set password "test123"
+set anomalyReporter "77$suffix"
+set claimReporter "78$suffix"
+set claimant "79$suffix"
+set anomalyItem "Test Anomali $suffix"
+set claimItem "Test Admin Klaim $suffix"
+set claimSecret "rahasia admin $suffix"
+
+# Create one locker anomaly for the admin to resolve.
+registerStudent $anomalyReporter "Test Anomali $suffix" 1 "anomaly-$suffix@example.test" "087$suffix" $password
+loginStudent $anomalyReporter $password
+depositItem $anomalyItem 5 "Loker Test" "Item untuk anomali" "detail anomali $suffix" 3
+logoutStudent
+
+# Create a second item and block a claimant after three failed verifications.
+registerStudent $claimReporter "Test Penemu Admin $suffix" 2 "admin-finder-$suffix@example.test" "088$suffix" $password
+loginStudent $claimReporter $password
+depositItem $claimItem 3 "Parkiran Test" "Item untuk klaim admin" $claimSecret 1
+logoutStudent
+
+registerStudent $claimant "Test Klaim Admin $suffix" 3 "admin-claimant-$suffix@example.test" "089$suffix" $password
+loginStudent $claimant $password
+for {set attempt 1} {$attempt <= 3} {incr attempt} {
+  sendLine 2
+  sendLine $claimItem
+  sendLine 0
+  sendLine ""
+  expect {
+    -re "\\[([0-9]+)\\] $claimItem" { set itemNumber $expect_out(1,string) }
+    timeout {
+      puts stderr "Barang test untuk klaim admin tidak ditemukan."
+      exit 1
+    }
+  }
+  sendLine $itemNumber
+  sendLine "detail salah"
+  if {$attempt < 3} {
+    expectText {Detail yang kamu masukkan salah\.}
+  } else {
+    expectText {Kamu sudah mencapai batas percobaan klaim; hubungi admin\.}
+  }
+  sendLine ""
+}
+logoutStudent
+
+# The seeded admin sees the anomaly, marks its locker defective, then approves
+# the blocked claim and confirms that locker status is shown.
+loginStudent admin admin123
+sendLine 1
+expect {
+  -re "\\[([0-9]+)\\] $anomalyItem" { set anomalyNumber $expect_out(1,string) }
+  timeout {
+    puts stderr "Anomali test tidak muncul di menu admin."
+    exit 1
+  }
+}
+sendLine ""
+sendLine 2
+sendLine $anomalyNumber
+sendLine 2
+sendLine ""
+
+sendLine 3
+expect {
+  -re "\\[([0-9]+)\\] $claimItem" { set blockedClaimNumber $expect_out(1,string) }
+  timeout {
+    puts stderr "Klaim terblokir test tidak muncul di menu admin."
+    exit 1
+  }
+}
+sendLine $blockedClaimNumber
+sendLine 1
+expect {
+  -re {Kode ambil baru: ([0-9]+)} { set approvedPickupCode $expect_out(1,string) }
+  timeout {
+    puts stderr "Kode ambil baru tidak ditampilkan."
+    exit 1
+  }
+}
+sendLine ""
+
+sendLine 4
+expectText {DEFECTIVE}
+sendLine ""
+sendLine 5
+expectText {MAIN MENU}
+
+# The approved claimant reports a pickup anomaly. Admin reset must cancel the
+# active claim, not merely make the item available again.
+loginStudent $claimant $password
+sendLine 2
+expect {
+  -re "\\[([0-9]+)\\] $claimItem" { set pendingItemNumber $expect_out(1,string) }
+  timeout {
+    puts stderr "Klaim aktif tidak tersedia untuk pengambilan."
+    exit 1
+  }
+}
+sendLine 2
+sendLine $pendingItemNumber
+sendLine $approvedPickupCode
+expectText {\[OK\] Pintu loker terbuka\.}
+sendLine 3
+expectText {Anomali tercatat; loker dikunci untuk verifikasi admin\.}
+logoutStudent
+
+loginStudent admin admin123
+sendLine 1
+expect {
+  -re "\\[([0-9]+)\\] $claimItem" { set resetItemNumber $expect_out(1,string) }
+  timeout {
+    puts stderr "Anomali pengambilan tidak muncul di menu admin."
+    exit 1
+  }
+}
+sendLine ""
+sendLine 2
+sendLine $resetItemNumber
+sendLine 1
+sendLine ""
+sendLine 5
+expectText {MAIN MENU}
+
+loginStudent $claimant $password
+sendLine 3
+expectText $claimItem
+expectText {Status   : CANCELLED}
+sendLine ""
+logoutStudent
+exitApp
