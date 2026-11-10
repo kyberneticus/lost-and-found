@@ -13,16 +13,9 @@ Skrip Expect ini membagi `docs/flowchart.md` menurut alurnya. Setiap skrip memba
 
 ## Menjalankan
 
-Gunakan **database uji khusus** yang sudah diinisialisasi dengan skema `database.sql`. Skrip menambah akun, barang, klaim, dan laporan uji; data tersebut tidak dihapus otomatis.
+Setiap skrip memakai direktori sementara sendiri, jadi tidak membutuhkan database atau konfigurasi tambahan.
 
 ```sh
-export DB_HOST=...
-export DB_PORT=3306
-export DB_NAME=<nama_database_uji>
-export DB_USER=...
-export DB_PASSWORD=...
-export ALLOW_MUTATING_TEST_DATABASE=1
-
 expect test/01-authentication.exp
 expect test/02-deposit.exp
 expect test/03-claim-pickup.exp
@@ -30,5 +23,3 @@ expect test/04-lost-report.exp
 expect test/05-history.exp
 expect test/06-admin.exp
 ```
-
-`database.sql` memakai schema `lostfound`; jika memakai nama lain, buat/import salinan skema itu ke database uji terlebih dahulu. `ALLOW_MUTATING_TEST_DATABASE=1` adalah pengaman agar skrip tidak sengaja dijalankan pada database non-uji.

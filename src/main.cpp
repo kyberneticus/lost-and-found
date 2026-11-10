@@ -1,9 +1,8 @@
 #include <cctype>
 #include <climits>
-#include <cstdlib>
 #include <ctime>
+#include <fstream>
 #include <iostream>
-#include <mysql/mysql.h>
 #include <string>
 
 using namespace std;
@@ -101,24 +100,15 @@ int claimCount = 0;
 int searchResult[MAX_FOUND];
 int searchResultCount = 0;
 
-MYSQL *databaseConnection = 0;
-bool databaseUserStored[MAX_USERS];
-int databaseItemId[MAX_FOUND], databaseDepositId[MAX_FOUND],
-    databaseDepositLockerId[MAX_FOUND], databaseActiveClaimId[MAX_FOUND],
-    databaseDepositCodeId[MAX_FOUND], databasePickupCodeId[MAX_FOUND];
-int databaseFailedClaimId[MAX_CLAIMS], databaseLostReportId[MAX_LOST],
-    databaseLockerId[MAX_LOCKERS];
-
-// ============ demo data ============
+// Seeds demo accounts and found items when storage is empty.
 string getTodayDate();
 
-// Seeds two student accounts and two ready-to-claim items when storage is empty.
 void loadDemoData() {
   if (userCount != 0 || foundCount != 0 || lostCount != 0) {
     return;
   }
 
-  userName[0] = "Azhri";
+userName[0] = "Azhri";
   userPassword[0] = "Azhri123";
   userPhone[0] = "081234567890";
   userFullName[0] = "Azhri Hytam";
@@ -290,6 +280,34 @@ bool isAllDigits(string s) {
   }
 
   return true;
+}
+
+// Splits one delimited storage line into fields.
+int splitLine(string line, char delimiter, string parts[],
+              int maxParts) {
+  string part = "";
+  int amount = 0;
+
+  int length = line.length();
+  for (int i = 0; i < length; i++) {
+    if (line[i] == delimiter) {
+      if (amount < maxParts) {
+        parts[amount] = part;
+        amount++;
+      }
+
+      part = "";
+    } else {
+      part += line[i];
+    }
+  }
+
+  if (amount < maxParts) {
+    parts[amount] = part;
+    amount++;
+  }
+
+  return amount;
 }
 
 // Checks whether a year is a leap year.
@@ -504,850 +522,311 @@ string selectMajor() {
   return MAJORS[choice - 1];
 }
 
-// ============ database persistence (MariaDB/MySQL) ============
-void databaseDisconnect() {
-  if (databaseConnection != 0) {
-    mysql_close(databaseConnection);
-    databaseConnection = 0;
-  }
-}
-
-bool databaseConnect() {
-  const char *host = getenv("DB_HOST");
-  const char *user = getenv("DB_USER");
-  const char *password = getenv("DB_PASSWORD");
-  const char *schema = getenv("DB_NAME");
-  const char *portText = getenv("DB_PORT");
-
-  if (host == 0 || user == 0 || password == 0 || schema == 0) {
-    cerr << "Database belum dikonfigurasi. Atur DB_HOST, DB_USER, "
-            "DB_PASSWORD, dan DB_NAME.\n";
-    return false;
-  }
-
-  unsigned int port = 3306;
-  if (portText != 0 && portText[0] != '\0') {
-    for (int i = 0; portText[i] != '\0'; i++) {
-      if (portText[i] < '0' || portText[i] > '9') {
-        cerr << "DB_PORT harus berupa angka.\n";
-        return false;
-      }
-    }
-    port = static_cast<unsigned int>(strtoul(portText, 0, 10));
-  }
-
-  databaseConnection = mysql_init(0);
-  if (databaseConnection == 0) {
-    cerr << "Gagal menyiapkan koneksi database.\n";
-    return false;
-  }
-
-  const char *charset = "utf8mb4";
-  mysql_options(databaseConnection, MYSQL_SET_CHARSET_NAME, charset);
-  if (mysql_real_connect(databaseConnection, host, user, password, schema,
-                         port, 0, 0) == 0) {
-    cerr << "Gagal terhubung ke database: " << mysql_error(databaseConnection)
-         << "\n";
-    databaseDisconnect();
-    return false;
-  }
-
-  return true;
-}
-
-bool databaseExecute(string query) {
-  if (mysql_query(databaseConnection, query.c_str()) != 0) {
-    cerr << "Database error: " << mysql_error(databaseConnection) << "\n";
-    return false;
-  }
-  return true;
-}
-
-MYSQL_RES *databaseSelect(string query) {
-  if (!databaseExecute(query)) {
-    return 0;
-  }
-
-  MYSQL_RES *result = mysql_store_result(databaseConnection);
-  if (result == 0) {
-    cerr << "Database tidak mengembalikan hasil query: "
-         << mysql_error(databaseConnection) << "\n";
-  }
-  return result;
-}
-
-string databaseQuote(string value) {
-  string escaped(value.length() * 2 + 1, '\0');
-  unsigned long length = mysql_real_escape_string(
-      databaseConnection, &escaped[0], value.c_str(), value.length());
-  return "'" + escaped.substr(0, length) + "'";
-}
-
-long databaseNumber(const char *value) {
-  return value == 0 ? 0 : strtol(value, 0, 10);
-}
-
-string databaseField(MYSQL_ROW row, int column) {
-  return row[column] == 0 ? "" : row[column];
-}
-
-int databaseUserIndex(string nim) {
-  for (int i = 0; i < userCount; i++) {
-    if (userName[i] == nim) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-int databaseItemIndex(int itemId) {
-  for (int i = 0; i < foundCount; i++) {
-    if (databaseItemId[i] == itemId) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-int databaseItemIndexByDeposit(int depositId) {
-  for (int i = 0; i < foundCount; i++) {
-    if (databaseDepositId[i] == depositId) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-int databaseItemIndexByClaim(int claimId) {
-  for (int i = 0; i < foundCount; i++) {
-    if (databaseActiveClaimId[i] == claimId) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-int databaseSingleId(string query) {
-  MYSQL_RES *result = databaseSelect(query);
-  if (result == 0) {
-    return 0;
-  }
-
-  MYSQL_ROW row = mysql_fetch_row(result);
-  int id = row == 0 ? 0 : static_cast<int>(databaseNumber(row[0]));
-  mysql_free_result(result);
-  return id;
-}
-
-int databaseCategoryId(string category) {
-  int id = databaseSingleId("SELECT id_kategori FROM categories WHERE "
-                            "nama_kategori = " + databaseQuote(category));
-  if (id != 0) {
-    return id;
-  }
-
-  if (!databaseExecute("INSERT INTO categories (nama_kategori) VALUES (" +
-                       databaseQuote(category) + ")")) {
-    return 0;
-  }
-  return static_cast<int>(mysql_insert_id(databaseConnection));
-}
-
-int databaseLocationId(string location) {
-  int id = databaseSingleId(
-      "SELECT id_lokasi FROM locations WHERE nama_gedung = " +
-      databaseQuote(location) + " AND detail = '' LIMIT 1");
-  if (id != 0) {
-    return id;
-  }
-
-  if (!databaseExecute("INSERT INTO locations (nama_gedung, detail) VALUES (" +
-                       databaseQuote(location) + ", '')")) {
-    return 0;
-  }
-  return static_cast<int>(mysql_insert_id(databaseConnection));
-}
-
-int databaseLockerIdForIndex(int lockerIndex) {
-  if (lockerIndex < 0 || lockerIndex >= MAX_LOCKERS) {
-    return 0;
-  }
-  if (databaseLockerId[lockerIndex] != 0) {
-    return databaseLockerId[lockerIndex];
-  }
-
-  databaseLockerId[lockerIndex] = databaseSingleId(
-      "SELECT id_locker FROM lockers WHERE nomor_loker = " +
-      to_string(lockerIndex + 1));
-  return databaseLockerId[lockerIndex];
-}
-
-bool databaseLogLockerEvent(int lockerIndex, int depositId, string eventType,
-                            string detail) {
-  int lockerId = databaseLockerIdForIndex(lockerIndex);
-  if (lockerId == 0) {
-    return false;
-  }
-
-  string deposit = depositId == 0 ? "NULL" : to_string(depositId);
-  return databaseExecute(
-      "INSERT INTO locker_event_logs (id_locker, id_deposit, tipe_event, "
-      "keterangan) VALUES (" +
-      to_string(lockerId) + ", " + deposit + ", " +
-      databaseQuote(eventType) + ", " + databaseQuote(detail) + ")");
-}
-
-bool lockerIsOccupied(int lockerIndex) {
-  for (int item = 0; item < foundCount; item++) {
-    if (foundLocker[item] == lockerIndex &&
-        foundStatus[item] != STATUS_DEPOSIT_CANCELLED &&
-        foundStatus[item] != STATUS_PICKED_UP) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool databasePasswordMatches(string nim, string password) {
-  return databaseSingleId("SELECT 1 FROM users WHERE nim = " +
-                          databaseQuote(nim) +
-                          " AND password_hash = SHA2(" +
-                          databaseQuote(password) + ", 256)") == 1;
-}
-
-bool databaseAccessCodeMatches(int codeId, string code) {
-  if (codeId == 0) {
-    return false;
-  }
-  return databaseSingleId("SELECT 1 FROM access_codes WHERE id_code = " +
-                          to_string(codeId) + " AND status = 'ACTIVE' AND "
-                          "code_hash = SHA2(" + databaseQuote(code) +
-                          ", 256)") == 1;
-}
-
-bool databaseLoadUsers() {
-  MYSQL_RES *result = databaseSelect(
-      "SELECT nim, no_hp, nama, jurusan, email, role, failed_login, "
-      "UNIX_TIMESTAMP(locked_until) FROM users ORDER BY nim");
-  if (result == 0) {
-    return false;
-  }
-
-  MYSQL_ROW row;
-  while ((row = mysql_fetch_row(result)) != 0 && userCount < MAX_USERS) {
-    userName[userCount] = databaseField(row, 0);
-    userPassword[userCount] = "";
-    userPhone[userCount] = databaseField(row, 1);
-    userFullName[userCount] = databaseField(row, 2);
-    userMajor[userCount] = databaseField(row, 3);
-    userEmail[userCount] = databaseField(row, 4);
-    userRole[userCount] = databaseField(row, 5);
-    userFailed[userCount] = static_cast<int>(databaseNumber(row[6]));
-    userLockedUntil[userCount] = databaseNumber(row[7]);
-    userLocked[userCount] = userLockedUntil[userCount] > time(0);
-    if (!userLocked[userCount]) {
-      userLockedUntil[userCount] = 0;
-    }
-    databaseUserStored[userCount] = true;
-    userCount++;
-  }
-  mysql_free_result(result);
-  return true;
-}
-
-bool databaseLoadLockers() {
-  MYSQL_RES *result = databaseSelect(
-      "SELECT id_locker, nomor_loker, status FROM lockers");
-  if (result == 0) {
-    return false;
-  }
-
-  MYSQL_ROW row;
-  while ((row = mysql_fetch_row(result)) != 0) {
-    int index = static_cast<int>(databaseNumber(row[1])) - 1;
-    if (index >= 0 && index < MAX_LOCKERS) {
-      databaseLockerId[index] = static_cast<int>(databaseNumber(row[0]));
-      lockerBroken[index] = databaseField(row, 2) == "BROKEN";
-    }
-  }
-  mysql_free_result(result);
-  return true;
-}
-
-bool databaseLoadItems() {
-  MYSQL_RES *result = databaseSelect(
-      "SELECT i.id_item, i.nim_penemu, c.nama_kategori, l.nama_gedung, "
-      "l.detail, i.nama_barang, i.ciri_ciri, i.tanggal_temuan, "
-      "i.data_verifikasi, i.status, COALESCE((SELECT p.path_foto FROM "
-      "item_photos p WHERE p.id_item = i.id_item ORDER BY p.urutan LIMIT 1), "
-      "'') FROM items i JOIN categories c ON c.id_kategori = i.id_kategori "
-      "JOIN locations l ON l.id_lokasi = i.id_lokasi ORDER BY i.id_item");
-  if (result == 0) {
-    return false;
-  }
-
-  MYSQL_ROW row;
-  while ((row = mysql_fetch_row(result)) != 0 && foundCount < MAX_FOUND) {
-    int reporter = databaseUserIndex(databaseField(row, 1));
-    if (reporter < 0) {
-      continue;
-    }
-
-    databaseItemId[foundCount] = static_cast<int>(databaseNumber(row[0]));
-    foundReporter[foundCount] = reporter;
-    foundCategory[foundCount] = databaseField(row, 2);
-    foundLocation[foundCount] = databaseField(row, 3);
-    if (databaseField(row, 4) != "") {
-      foundLocation[foundCount] += " - " + databaseField(row, 4);
-    }
-    foundName[foundCount] = databaseField(row, 5);
-    foundDescription[foundCount] = databaseField(row, 6);
-    foundDate[foundCount] = databaseField(row, 7);
-    foundSecret[foundCount] = databaseField(row, 8);
-    foundStatus[foundCount] = databaseField(row, 9);
-    foundPhoto[foundCount] = databaseField(row, 10);
-    foundLocker[foundCount] = -1;
-    foundClaimant[foundCount] = -1;
-    foundCount++;
-  }
-  mysql_free_result(result);
-  return true;
-}
-
-bool databaseLoadLostReports() {
-  MYSQL_RES *result = databaseSelect(
-      "SELECT r.id_laporan, r.nim_pelapor, c.nama_kategori, l.nama_gedung, "
-      "l.detail, r.nama_barang, r.ciri_ciri, r.tanggal_hilang FROM "
-      "lost_reports r JOIN categories c ON c.id_kategori = r.id_kategori "
-      "JOIN locations l ON l.id_lokasi = r.id_lokasi ORDER BY r.id_laporan");
-  if (result == 0) {
-    return false;
-  }
-
-  MYSQL_ROW row;
-  while ((row = mysql_fetch_row(result)) != 0 && lostCount < MAX_LOST) {
-    int reporter = databaseUserIndex(databaseField(row, 1));
-    if (reporter < 0) {
-      continue;
-    }
-    databaseLostReportId[lostCount] =
-        static_cast<int>(databaseNumber(row[0]));
-    lostReporter[lostCount] = reporter;
-    lostCategory[lostCount] = databaseField(row, 2);
-    lostLocation[lostCount] = databaseField(row, 3);
-    if (databaseField(row, 4) != "") {
-      lostLocation[lostCount] += " - " + databaseField(row, 4);
-    }
-    lostName[lostCount] = databaseField(row, 5);
-    lostDescription[lostCount] = databaseField(row, 6);
-    lostDate[lostCount] = databaseField(row, 7);
-    lostCount++;
-  }
-  mysql_free_result(result);
-  return true;
-}
-
-bool databaseLoadDeposits() {
-  MYSQL_RES *result = databaseSelect(
-      "SELECT d.id_deposit, d.id_item, d.id_locker, l.nomor_loker, d.status, "
-      "UNIX_TIMESTAMP(d.reserve_expires_at) FROM deposits d JOIN (SELECT "
-      "id_item, MAX(id_deposit) AS id_deposit FROM deposits GROUP BY id_item) "
-      "latest ON latest.id_deposit = d.id_deposit JOIN lockers l ON "
-      "l.id_locker = d.id_locker");
-  if (result == 0) {
-    return false;
-  }
-
-  MYSQL_ROW row;
-  while ((row = mysql_fetch_row(result)) != 0) {
-    int itemIndex = databaseItemIndex(static_cast<int>(databaseNumber(row[1])));
-    if (itemIndex < 0) {
-      continue;
-    }
-    databaseDepositId[itemIndex] = static_cast<int>(databaseNumber(row[0]));
-    databaseDepositLockerId[itemIndex] =
-        static_cast<int>(databaseNumber(row[2]));
-    string status = databaseField(row, 4);
-    if (status == "RESERVED" || status == "DEPOSITED" || status == "VERIFY") {
-      foundLocker[itemIndex] = static_cast<int>(databaseNumber(row[3])) - 1;
-    }
-    if (status == "RESERVED") {
-      foundReservationExpiry[itemIndex] = databaseNumber(row[5]);
-    }
-  }
-  mysql_free_result(result);
-  return true;
-}
-
-bool databaseLoadClaims() {
-  MYSQL_RES *active = databaseSelect(
-      "SELECT id_claim, id_item, nim_pengklaim, status FROM claims WHERE "
-      "status IN ('PENDING', 'APPROVED', 'LOCKED') ORDER BY id_claim");
-  if (active == 0) {
-    return false;
-  }
-
-  MYSQL_ROW row;
-  while ((row = mysql_fetch_row(active)) != 0) {
-    int itemIndex = databaseItemIndex(static_cast<int>(databaseNumber(row[1])));
-    int claimant = databaseUserIndex(databaseField(row, 2));
-    if (itemIndex >= 0 && claimant >= 0) {
-      databaseActiveClaimId[itemIndex] = static_cast<int>(databaseNumber(row[0]));
-      foundClaimant[itemIndex] = claimant;
-    }
-  }
-  mysql_free_result(active);
-
-  MYSQL_RES *failed = databaseSelect(
-      "SELECT id_claim, id_item, nim_pengklaim, failed_count FROM claims "
-      "WHERE status = 'REJECTED' AND failed_count > 0 ORDER BY id_claim");
-  if (failed == 0) {
-    return false;
-  }
-
-  while ((row = mysql_fetch_row(failed)) != 0 && claimCount < MAX_CLAIMS) {
-    int itemIndex = databaseItemIndex(static_cast<int>(databaseNumber(row[1])));
-    int claimant = databaseUserIndex(databaseField(row, 2));
-    if (itemIndex >= 0 && claimant >= 0) {
-      databaseFailedClaimId[claimCount] =
-          static_cast<int>(databaseNumber(row[0]));
-      claimItem[claimCount] = itemIndex;
-      claimUser[claimCount] = claimant;
-      claimFailed[claimCount] = static_cast<int>(databaseNumber(row[3]));
-      claimCount++;
-    }
-  }
-  mysql_free_result(failed);
-  return true;
-}
-
-bool databaseLoadAccessCodes() {
-  MYSQL_RES *result = databaseSelect(
-      "SELECT id_code, id_deposit, id_claim, tipe, UNIX_TIMESTAMP(expires_at), "
-      "failed_count FROM access_codes WHERE status = 'ACTIVE'");
-  if (result == 0) {
-    return false;
-  }
-
-  MYSQL_ROW row;
-  while ((row = mysql_fetch_row(result)) != 0) {
-    string type = databaseField(row, 3);
-    if (type == "DEPOSIT") {
-      int itemIndex = databaseItemIndexByDeposit(
-          static_cast<int>(databaseNumber(row[1])));
-      if (itemIndex >= 0) {
-        databaseDepositCodeId[itemIndex] =
-            static_cast<int>(databaseNumber(row[0]));
-        foundReservationExpiry[itemIndex] = databaseNumber(row[4]);
-        foundDepositFailed[itemIndex] =
-            static_cast<int>(databaseNumber(row[5]));
-      }
-    } else if (type == "PICKUP") {
-      int itemIndex = databaseItemIndexByClaim(
-          static_cast<int>(databaseNumber(row[2])));
-      if (itemIndex >= 0) {
-        databasePickupCodeId[itemIndex] =
-            static_cast<int>(databaseNumber(row[0]));
-        foundPickupExpiry[itemIndex] = databaseNumber(row[4]);
-        foundPickupFailed[itemIndex] = static_cast<int>(databaseNumber(row[5]));
-      }
-    }
-  }
-  mysql_free_result(result);
-  return true;
-}
-
-// Loads the application state from the migrated relational schema.
+// Loads persisted users, lockers, items, reports, and claims.
 void loadAll() {
   userCount = 0;
   foundCount = 0;
   lostCount = 0;
   claimCount = 0;
-  for (int i = 0; i < MAX_USERS; i++) {
-    databaseUserStored[i] = false;
-  }
-  for (int i = 0; i < MAX_FOUND; i++) {
-    databaseItemId[i] = 0;
-    databaseDepositId[i] = 0;
-    databaseDepositLockerId[i] = 0;
-    databaseActiveClaimId[i] = 0;
-    databaseDepositCodeId[i] = 0;
-    databasePickupCodeId[i] = 0;
-  }
-  for (int i = 0; i < MAX_LOST; i++) {
-    databaseLostReportId[i] = 0;
-  }
-  for (int i = 0; i < MAX_CLAIMS; i++) {
-    databaseFailedClaimId[i] = 0;
-  }
-  for (int i = 0; i < MAX_LOCKERS; i++) {
-    databaseLockerId[i] = 0;
-    lockerBroken[i] = false;
-  }
 
-  if (!databaseLoadUsers() || !databaseLoadLockers() || !databaseLoadItems() ||
-      !databaseLoadLostReports() || !databaseLoadDeposits() ||
-      !databaseLoadClaims() || !databaseLoadAccessCodes()) {
-    cerr << "Gagal memuat data dari database.\n";
-    exit(EXIT_FAILURE);
-  }
-}
-
-string databaseDepositStatus(int itemIndex) {
-  if (foundStatus[itemIndex] == STATUS_DEPOSIT_PENDING) {
-    return "RESERVED";
-  }
-  if (foundStatus[itemIndex] == STATUS_DEPOSIT_CANCELLED) {
-    return "CANCELLED";
-  }
-  if (foundStatus[itemIndex] == STATUS_PICKED_UP) {
-    return "PICKED_UP";
-  }
-  if (foundStatus[itemIndex] == STATUS_NEEDS_VERIFICATION ||
-      foundStatus[itemIndex] == STATUS_PICKUP_LOCKED) {
-    return "VERIFY";
-  }
-  return "DEPOSITED";
-}
-
-string databaseClaimStatus(int itemIndex) {
-  if (foundStatus[itemIndex] == STATUS_PICKED_UP) {
-    return "APPROVED";
-  }
-  if (foundStatus[itemIndex] == STATUS_PICKUP_LOCKED ||
-      foundStatus[itemIndex] == STATUS_NEEDS_VERIFICATION) {
-    return "LOCKED";
-  }
-  return "PENDING";
-}
-
-bool databaseSaveUsers() {
-  for (int i = 0; i < userCount; i++) {
-    string lockedUntil = userLocked[i]
-                             ? "FROM_UNIXTIME(" + to_string(userLockedUntil[i]) + ")"
-                             : "NULL";
-    string query;
-    if (!databaseUserStored[i]) {
-      query = "INSERT INTO users (nim, nama, jurusan, email, no_hp, "
-              "password_hash, role, failed_login, locked_until) VALUES (" +
-              databaseQuote(userName[i]) + ", " +
-              databaseQuote(userFullName[i]) + ", " +
-              databaseQuote(userMajor[i]) + ", " +
-              databaseQuote(userEmail[i]) + ", " +
-              databaseQuote(userPhone[i]) + ", SHA2(" +
-              databaseQuote(userPassword[i]) + ", 256), " +
-              databaseQuote(userRole[i]) + ", " +
-              to_string(userFailed[i]) + ", " + lockedUntil +
-              ") ON DUPLICATE KEY UPDATE nama = VALUES(nama), "
-              "jurusan = VALUES(jurusan), email = VALUES(email), "
-              "no_hp = VALUES(no_hp), password_hash = VALUES(password_hash), "
-              "role = VALUES(role), failed_login = VALUES(failed_login), "
-              "locked_until = VALUES(locked_until)";
-    } else {
-      query = "UPDATE users SET nama = " + databaseQuote(userFullName[i]) +
-              ", jurusan = " + databaseQuote(userMajor[i]) +
-              ", email = " + databaseQuote(userEmail[i]) +
-              ", no_hp = " + databaseQuote(userPhone[i]) +
-              ", role = " + databaseQuote(userRole[i]) +
-              ", failed_login = " + to_string(userFailed[i]) +
-              ", locked_until = " + lockedUntil + " WHERE nim = " +
-              databaseQuote(userName[i]);
-    }
-    if (!databaseExecute(query)) {
-      return false;
-    }
-    databaseUserStored[i] = true;
-  }
-  return true;
-}
-
-bool databaseSaveLockers() {
-  for (int locker = 0; locker < MAX_LOCKERS; locker++) {
-    int lockerId = databaseLockerIdForIndex(locker);
-    if (lockerId == 0) {
-      cerr << "Loker " << locker + 1 << " tidak ditemukan di database.\n";
-      return false;
-    }
-
-    string status = lockerBroken[locker] ? "BROKEN"
-                                         : (lockerIsOccupied(locker) ? "OCCUPIED"
-                                                                     : "READY");
-    if (!databaseExecute("UPDATE lockers SET status = " + databaseQuote(status) +
-                         " WHERE id_locker = " + to_string(lockerId))) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool databaseSaveItems() {
-  for (int i = 0; i < foundCount; i++) {
-    if (foundReporter[i] < 0 || foundReporter[i] >= userCount) {
-      cerr << "Pelapor barang tidak valid.\n";
-      return false;
-    }
-
-    int categoryId = databaseCategoryId(foundCategory[i]);
-    int locationId = databaseLocationId(foundLocation[i]);
-    if (categoryId == 0 || locationId == 0) {
-      return false;
-    }
-
-    string fields = "nim_penemu = " + databaseQuote(userName[foundReporter[i]]) +
-                    ", id_kategori = " + to_string(categoryId) +
-                    ", id_lokasi = " + to_string(locationId) +
-                    ", nama_barang = " + databaseQuote(foundName[i]) +
-                    ", ciri_ciri = " + databaseQuote(foundDescription[i]) +
-                    ", tanggal_temuan = " + databaseQuote(foundDate[i]) +
-                    ", data_verifikasi = " + databaseQuote(foundSecret[i]) +
-                    ", status = " + databaseQuote(foundStatus[i]);
-
-    if (databaseItemId[i] == 0) {
-      if (!databaseExecute("INSERT INTO items SET " + fields)) {
-        return false;
+  ifstream userFile("users.txt");
+  if (userFile.is_open()) {
+    string line;
+    while (getline(userFile, line)) {
+      if (userCount >= MAX_USERS) {
+        break;
       }
-      databaseItemId[i] = static_cast<int>(mysql_insert_id(databaseConnection));
-    } else if (!databaseExecute("UPDATE items SET " + fields +
-                                " WHERE id_item = " +
-                                to_string(databaseItemId[i]))) {
-      return false;
-    }
-
-    if (foundPhoto[i] != "" &&
-        !databaseExecute("INSERT INTO item_photos (id_item, path_foto, urutan) "
-                         "VALUES (" + to_string(databaseItemId[i]) + ", " +
-                         databaseQuote(foundPhoto[i]) + ", 1) ON DUPLICATE KEY "
-                         "UPDATE path_foto = VALUES(path_foto)")) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool databaseSaveDeposits() {
-  for (int i = 0; i < foundCount; i++) {
-    string status = databaseDepositStatus(i);
-    int lockerId = foundLocker[i] >= 0
-                       ? databaseLockerIdForIndex(foundLocker[i])
-                       : databaseDepositLockerId[i];
-    if (databaseDepositId[i] == 0 && lockerId == 0) {
-      continue;
-    }
-    if (lockerId == 0) {
-      cerr << "Loker barang tidak valid.\n";
-      return false;
-    }
-
-    string expires = foundReservationExpiry[i] > 0
-                         ? "FROM_UNIXTIME(" + to_string(foundReservationExpiry[i]) + ")"
-                         : "CURRENT_TIMESTAMP";
-    if (databaseDepositId[i] == 0) {
-      string depositedAt = status == "DEPOSITED" ? "CURRENT_TIMESTAMP" : "NULL";
-      string pickedUpAt = status == "PICKED_UP" ? "CURRENT_TIMESTAMP" : "NULL";
-      if (!databaseExecute(
-              "INSERT INTO deposits (id_item, id_locker, reserve_expires_at, "
-              "deposited_at, picked_up_at, status) VALUES (" +
-              to_string(databaseItemId[i]) + ", " + to_string(lockerId) +
-              ", " + expires + ", " + depositedAt + ", " + pickedUpAt +
-              ", " + databaseQuote(status) + ")")) {
-        return false;
-      }
-      databaseDepositId[i] = static_cast<int>(mysql_insert_id(databaseConnection));
-      databaseDepositLockerId[i] = lockerId;
-    } else if (!databaseExecute(
-                   "UPDATE deposits SET id_locker = " + to_string(lockerId) +
-                   ", reserve_expires_at = " + expires + ", status = " +
-                   databaseQuote(status) + ", deposited_at = CASE WHEN " +
-                   databaseQuote(status) + " = 'DEPOSITED' AND deposited_at IS NULL "
-                   "THEN CURRENT_TIMESTAMP ELSE deposited_at END, picked_up_at = "
-                   "CASE WHEN " + databaseQuote(status) + " = 'PICKED_UP' AND "
-                   "picked_up_at IS NULL THEN CURRENT_TIMESTAMP ELSE picked_up_at END "
-                   "WHERE id_deposit = " + to_string(databaseDepositId[i]))) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool databaseSaveClaims() {
-  for (int i = 0; i < claimCount; i++) {
-    if (claimItem[i] < 0 || claimItem[i] >= foundCount || claimUser[i] < 0 ||
-        claimUser[i] >= userCount) {
-      continue;
-    }
-    if (databaseFailedClaimId[i] == 0) {
-      if (!databaseExecute("INSERT INTO claims (id_item, nim_pengklaim, "
-                           "detail_claim, failed_count, status) VALUES (" +
-                           to_string(databaseItemId[claimItem[i]]) + ", " +
-                           databaseQuote(userName[claimUser[i]]) +
-                           ", '', " + to_string(claimFailed[i]) +
-                           ", 'REJECTED')")) {
-        return false;
-      }
-      databaseFailedClaimId[i] =
-          static_cast<int>(mysql_insert_id(databaseConnection));
-    } else if (!databaseExecute("UPDATE claims SET failed_count = " +
-                                to_string(claimFailed[i]) +
-                                " WHERE id_claim = " +
-                                to_string(databaseFailedClaimId[i]))) {
-      return false;
-    }
-  }
-
-  for (int i = 0; i < foundCount; i++) {
-    if (foundClaimant[i] < 0) {
-      if (databaseActiveClaimId[i] != 0) {
-        string status = foundStatus[i] == STATUS_PICKED_UP ? "APPROVED" : "CANCELLED";
-        if (!databaseExecute("UPDATE claims SET status = " +
-                             databaseQuote(status) +
-                             ", verified_at = CASE WHEN " +
-                             databaseQuote(status) + " = 'APPROVED' THEN "
-                             "CURRENT_TIMESTAMP ELSE verified_at END WHERE "
-                             "id_claim = " +
-                             to_string(databaseActiveClaimId[i]))) {
-          return false;
+      string parts[9];
+      int partsCount = splitLine(line, '|', parts, 9);
+      if (partsCount == 5 || partsCount == 8 || partsCount == 9) {
+        userName[userCount] = parts[0];
+        userPassword[userCount] = parts[1];
+        userPhone[userCount] = parts[2];
+        userFullName[userCount] = partsCount >= 8 ? parts[5] : "";
+        userMajor[userCount] = partsCount >= 8 ? parts[6] : "";
+        userEmail[userCount] = partsCount >= 8 ? parts[7] : "";
+        userRole[userCount] = partsCount == 9 ? parts[8] : ROLE_STUDENT;
+        int failedVal = 0;
+        for (int i = 0; i < (int)parts[3].length(); i++) {
+          if (parts[3][i] >= '0' && parts[3][i] <= '9') {
+            failedVal = failedVal * 10 + (parts[3][i] - '0');
+          }
         }
-      }
-      continue;
-    }
+        userFailed[userCount] = failedVal;
+        userLocked[userCount] = (parts[4] == "1");
 
-    string status = databaseClaimStatus(i);
-    if (databaseActiveClaimId[i] == 0) {
-      if (!databaseExecute("INSERT INTO claims (id_item, nim_pengklaim, "
-                           "detail_claim, status) VALUES (" +
-                           to_string(databaseItemId[i]) + ", " +
-                           databaseQuote(userName[foundClaimant[i]]) +
-                           ", '', " + databaseQuote(status) + ")")) {
-        return false;
+        userCount++;
       }
-      databaseActiveClaimId[i] =
-          static_cast<int>(mysql_insert_id(databaseConnection));
-    } else if (!databaseExecute("UPDATE claims SET status = " +
-                                databaseQuote(status) +
-                                ", verified_at = CASE WHEN " +
-                                databaseQuote(status) + " = 'APPROVED' THEN "
-                                "CURRENT_TIMESTAMP ELSE verified_at END WHERE "
-                                "id_claim = " +
-                                to_string(databaseActiveClaimId[i]))) {
-      return false;
     }
+    userFile.close();
   }
-  return true;
+
+  ifstream lockerFile("lockers.txt");
+  if (lockerFile.is_open()) {
+    string line;
+    for (int i = 0; i < MAX_LOCKERS && getline(lockerFile, line); i++) {
+      lockerBroken[i] = (line == "1");
+    }
+    lockerFile.close();
+  }
+
+  ifstream foundFile("found_items.txt");
+  if (foundFile.is_open()) {
+    string line;
+    while (getline(foundFile, line)) {
+      if (foundCount >= MAX_FOUND) {
+        break;
+      }
+      string parts[16];
+      int partsCount = splitLine(line, '|', parts, 16);
+      if (partsCount == 8 || partsCount == 12 || partsCount == 16) {
+        int repIndex = 0;
+        for (int i = 0; i < (int)parts[0].length(); i++) {
+          if (parts[0][i] >= '0' && parts[0][i] <= '9') {
+            repIndex = repIndex * 10 + (parts[0][i] - '0');
+          }
+        }
+
+        foundReporter[foundCount] = repIndex;
+        foundName[foundCount] = parts[1];
+        foundCategory[foundCount] = parts[2];
+        foundLocation[foundCount] = parts[3];
+        foundDate[foundCount] = parts[4];
+        foundDescription[foundCount] = parts[5];
+        foundSecret[foundCount] = parts[6];
+        foundStatus[foundCount] = parts[7];
+        foundPhoto[foundCount] = partsCount >= 12 ? parts[8] : "";
+        foundLocker[foundCount] = -1;
+        foundDepositCode[foundCount] = partsCount >= 12 ? parts[10] : "";
+        foundReservationExpiry[foundCount] = 0;
+        foundClaimant[foundCount] = -1;
+        foundPickupCode[foundCount] = partsCount == 16 ? parts[13] : "";
+        foundPickupExpiry[foundCount] = 0;
+        foundPickupFailed[foundCount] = 0;
+
+        if (partsCount >= 12) {
+          int locker = 0;
+          bool lockerValid = parts[9] != "";
+          int start = 0;
+          if (lockerValid && parts[9][0] == '-') {
+            start = 1;
+          }
+          if (start == (int)parts[9].length()) {
+            lockerValid = false;
+          }
+          for (int i = start; i < (int)parts[9].length(); i++) {
+            if (parts[9][i] < '0' || parts[9][i] > '9') {
+              lockerValid = false;
+              break;
+            }
+            locker = locker * 10 + (parts[9][i] - '0');
+            if (locker > MAX_LOCKERS) {
+              lockerValid = false;
+              break;
+            }
+          }
+          if (lockerValid && parts[9][0] == '-') {
+            locker = -locker;
+          }
+          if (lockerValid && locker >= -1 && locker < MAX_LOCKERS) {
+            foundLocker[foundCount] = locker;
+          }
+
+          long expiry = 0;
+          bool expiryValid = parts[11] != "";
+          for (int i = 0; i < (int)parts[11].length(); i++) {
+            if (parts[11][i] < '0' || parts[11][i] > '9') {
+              expiryValid = false;
+              break;
+            }
+            int digit = parts[11][i] - '0';
+            if (expiry > (LONG_MAX - digit) / 10) {
+              expiryValid = false;
+              break;
+            }
+            expiry = expiry * 10 + digit;
+          }
+          if (expiryValid) {
+            foundReservationExpiry[foundCount] = expiry;
+          }
+        }
+
+        if (partsCount == 16) {
+          if (isAllDigits(parts[12])) {
+            int claimant = 0;
+            bool claimantValid = true;
+            for (int i = 0; i < (int)parts[12].length(); i++) {
+              int digit = parts[12][i] - '0';
+              if (claimant > (MAX_USERS - digit) / 10) {
+                claimantValid = false;
+                break;
+              }
+              claimant = claimant * 10 + digit;
+            }
+            if (claimantValid && claimant < MAX_USERS) {
+              foundClaimant[foundCount] = claimant;
+            }
+          }
+
+          long pickupExpiry = 0;
+          bool pickupExpiryValid = isAllDigits(parts[14]);
+          for (int i = 0; i < (int)parts[14].length(); i++) {
+            int digit = parts[14][i] - '0';
+            if (pickupExpiry > (LONG_MAX - digit) / 10) {
+              pickupExpiryValid = false;
+              break;
+            }
+            pickupExpiry = pickupExpiry * 10 + digit;
+          }
+          if (pickupExpiryValid) {
+            foundPickupExpiry[foundCount] = pickupExpiry;
+          }
+
+          if (isAllDigits(parts[15])) {
+            int failed = 0;
+            bool failedValid = true;
+            for (int i = 0; i < (int)parts[15].length(); i++) {
+              int digit = parts[15][i] - '0';
+              if (failed > (MAX_CLAIM_ATTEMPTS - digit) / 10) {
+                failedValid = false;
+                break;
+              }
+              failed = failed * 10 + digit;
+            }
+            if (failedValid && failed <= MAX_CLAIM_ATTEMPTS) {
+              foundPickupFailed[foundCount] = failed;
+            }
+          }
+        }
+
+        foundCount++;
+      }
+    }
+    foundFile.close();
+  }
+
+  ifstream lostFile("lost_reports.txt");
+  if (lostFile.is_open()) {
+    string line;
+    while (getline(lostFile, line)) {
+      if (lostCount >= MAX_LOST) {
+        break;
+      }
+      string parts[6];
+      int partsCount = splitLine(line, '|', parts, 6);
+      if (partsCount == 6) {
+        int repIndex = 0;
+        for (int i = 0; i < (int)parts[0].length(); i++) {
+          if (parts[0][i] >= '0' && parts[0][i] <= '9') {
+            repIndex = repIndex * 10 + (parts[0][i] - '0');
+          }
+        }
+
+        lostReporter[lostCount] = repIndex;
+        lostName[lostCount] = parts[1];
+        lostCategory[lostCount] = parts[2];
+        lostLocation[lostCount] = parts[3];
+        lostDate[lostCount] = parts[4];
+        lostDescription[lostCount] = parts[5];
+
+        lostCount++;
+      }
+    }
+    lostFile.close();
+  }
+
+  ifstream claimFile("claims.txt");
+  if (claimFile.is_open()) {
+    string line;
+    while (getline(claimFile, line)) {
+      if (claimCount >= MAX_CLAIMS) {
+        break;
+      }
+      string parts[3];
+      int partsCount = splitLine(line, '|', parts, 3);
+      if (partsCount == 3) {
+        int cItem = 0, cUser = 0, cFailed = 0;
+
+        for (int i = 0; i < (int)parts[0].length(); i++)
+          if (parts[0][i] >= '0' && parts[0][i] <= '9')
+            cItem = cItem * 10 + (parts[0][i] - '0');
+        for (int i = 0; i < (int)parts[1].length(); i++)
+          if (parts[1][i] >= '0' && parts[1][i] <= '9')
+            cUser = cUser * 10 + (parts[1][i] - '0');
+        for (int i = 0; i < (int)parts[2].length(); i++)
+          if (parts[2][i] >= '0' && parts[2][i] <= '9')
+            cFailed = cFailed * 10 + (parts[2][i] - '0');
+
+        claimItem[claimCount] = cItem;
+        claimUser[claimCount] = cUser;
+        claimFailed[claimCount] = cFailed;
+
+        claimCount++;
+      }
+    }
+    claimFile.close();
+  }
 }
 
-bool databaseSaveAccessCode(int *codeId, int depositId, int claimId,
-                            string type, string code, long expiry,
-                            string inactiveStatus,
-                            bool keepActiveWithoutPlaintext, int failedCount) {
-  if (code == "") {
-    if (*codeId == 0) {
-      return true;
-    }
-    if (keepActiveWithoutPlaintext) {
-      return databaseExecute("UPDATE access_codes SET failed_count = " +
-                             to_string(failedCount) + " WHERE id_code = " +
-                             to_string(*codeId));
-    }
-    return databaseExecute("UPDATE access_codes SET failed_count = " +
-                           to_string(failedCount) + ", status = " +
-                           databaseQuote(inactiveStatus) +
-                           ", used_at = CASE WHEN " +
-                           databaseQuote(inactiveStatus) +
-                           " = 'USED' THEN CURRENT_TIMESTAMP ELSE used_at END "
-                           "WHERE id_code = " + to_string(*codeId));
-  }
-
-  string expires = expiry > 0 ? "FROM_UNIXTIME(" + to_string(expiry) + ")"
-                              : "CURRENT_TIMESTAMP";
-  if (*codeId == 0) {
-    string deposit = type == "DEPOSIT" ? to_string(depositId) : "NULL";
-    string claim = type == "PICKUP" ? to_string(claimId) : "NULL";
-    if (!databaseExecute("INSERT INTO access_codes (id_deposit, id_claim, "
-                         "tipe, code_hash, expires_at, failed_count) VALUES (" +
-                         deposit + ", " + claim + ", " + databaseQuote(type) +
-                         ", SHA2(" + databaseQuote(code) + ", 256), " +
-                         expires + ", " + to_string(failedCount) + ")")) {
-      return false;
-    }
-    *codeId = static_cast<int>(mysql_insert_id(databaseConnection));
-    return true;
-  }
-
-  return databaseExecute("UPDATE access_codes SET code_hash = SHA2(" +
-                         databaseQuote(code) + ", 256), expires_at = " +
-                         expires + ", failed_count = " +
-                         to_string(failedCount) + ", status = 'ACTIVE', "
-                         "used_at = NULL WHERE id_code = " +
-                         to_string(*codeId));
-}
-
-bool databaseSaveLostReports() {
-  for (int i = 0; i < lostCount; i++) {
-    if (lostReporter[i] < 0 || lostReporter[i] >= userCount) {
-      cerr << "Pelapor kehilangan tidak valid.\n";
-      return false;
-    }
-    int categoryId = databaseCategoryId(lostCategory[i]);
-    int locationId = databaseLocationId(lostLocation[i]);
-    if (categoryId == 0 || locationId == 0) {
-      return false;
-    }
-    string fields = "nim_pelapor = " + databaseQuote(userName[lostReporter[i]]) +
-                    ", id_kategori = " + to_string(categoryId) +
-                    ", id_lokasi = " + to_string(locationId) +
-                    ", nama_barang = " + databaseQuote(lostName[i]) +
-                    ", ciri_ciri = " + databaseQuote(lostDescription[i]) +
-                    ", tanggal_hilang = " + databaseQuote(lostDate[i]);
-    if (databaseLostReportId[i] == 0) {
-      if (!databaseExecute("INSERT INTO lost_reports SET " + fields)) {
-        return false;
-      }
-      databaseLostReportId[i] =
-          static_cast<int>(mysql_insert_id(databaseConnection));
-    } else if (!databaseExecute("UPDATE lost_reports SET " + fields +
-                                " WHERE id_laporan = " +
-                                to_string(databaseLostReportId[i]))) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// Persists the in-memory state to the migrated relational schema.
+// Persists users, lockers, items, reports, and claims.
 void saveAll() {
-  if (!databaseExecute("START TRANSACTION")) {
-    return;
+  ofstream userFile("users.txt");
+  if (userFile.is_open()) {
+    for (int i = 0; i < userCount; i++) {
+      userFile << sanitizeField(userName[i]) << "|"
+               << sanitizeField(userPassword[i]) << "|"
+               << sanitizeField(userPhone[i]) << "|" << userFailed[i] << "|"
+               << (userLocked[i] ? 1 : 0) << "|"
+               << sanitizeField(userFullName[i]) << "|"
+               << sanitizeField(userMajor[i]) << "|"
+               << sanitizeField(userEmail[i]) << "|"
+               << sanitizeField(userRole[i]) << "\n";
+    }
+    userFile.close();
   }
 
-  bool saved = databaseSaveUsers() && databaseSaveLockers() &&
-               databaseSaveItems() && databaseSaveDeposits() &&
-               databaseSaveClaims();
-  for (int i = 0; saved && i < foundCount; i++) {
-    string depositInactive = foundStatus[i] == STATUS_AVAILABLE ? "USED" : "CANCELLED";
-    string pickupInactive = foundStatus[i] == STATUS_PICKED_UP
-                                ? "USED"
-                                : (foundStatus[i] == STATUS_PICKUP_LOCKED ? "LOCKED"
-                                                                             : "CANCELLED");
-    bool keepDepositCode = databaseDepositCodeId[i] != 0 &&
-                           foundDepositCode[i] == "" &&
-                           foundStatus[i] == STATUS_DEPOSIT_PENDING;
-    bool keepPickupCode = databasePickupCodeId[i] != 0 &&
-                          foundPickupCode[i] == "" &&
-                          foundStatus[i] == STATUS_CLAIM_PENDING;
-    saved = databaseSaveAccessCode(&databaseDepositCodeId[i], databaseDepositId[i],
-                                   0, "DEPOSIT", foundDepositCode[i],
-                                   foundReservationExpiry[i], depositInactive,
-                                   keepDepositCode, foundDepositFailed[i]) &&
-            databaseSaveAccessCode(&databasePickupCodeId[i], 0,
-                                   databaseActiveClaimId[i], "PICKUP",
-                                   foundPickupCode[i], foundPickupExpiry[i],
-                                   pickupInactive, keepPickupCode,
-                                   foundPickupFailed[i]);
-  }
-  saved = saved && databaseSaveLostReports();
+  ofstream foundFile("found_items.txt");
+  if (foundFile.is_open()) {
+    for (int i = 0; i < foundCount; i++) {
+      foundFile << foundReporter[i] << "|" << sanitizeField(foundName[i]) << "|"
+                << sanitizeField(foundCategory[i]) << "|"
+                << sanitizeField(foundLocation[i]) << "|" << foundDate[i] << "|"
+                << sanitizeField(foundDescription[i]) << "|"
+                << sanitizeField(foundSecret[i]) << "|" << foundStatus[i] << "|"
+                << sanitizeField(foundPhoto[i]) << "|" << foundLocker[i] << "|"
+                << sanitizeField(foundDepositCode[i]) << "|"
+                << foundReservationExpiry[i] << "|" << foundClaimant[i] << "|"
+                << sanitizeField(foundPickupCode[i]) << "|"
+                << foundPickupExpiry[i] << "|" << foundPickupFailed[i] << "\n";
+    }
+    foundFile.close();  }
 
-  if (!databaseExecute(saved ? "COMMIT" : "ROLLBACK")) {
-    cerr << "Gagal menyimpan data ke database.\n";
+  ofstream lockerFile("lockers.txt");
+  if (lockerFile.is_open()) {
+    for (int i = 0; i < MAX_LOCKERS; i++) {
+      lockerFile << (lockerBroken[i] ? 1 : 0) << "\n";
+    }
+    lockerFile.close();
+  }
+
+  ofstream lostFile("lost_reports.txt");
+  if (lostFile.is_open()) {
+    for (int i = 0; i < lostCount; i++) {
+      lostFile << lostReporter[i] << "|" << sanitizeField(lostName[i]) << "|"
+               << sanitizeField(lostCategory[i]) << "|"
+               << sanitizeField(lostLocation[i]) << "|" << lostDate[i] << "|"
+               << sanitizeField(lostDescription[i]) << "\n";
+    }
+    lostFile.close();
+  }
+
+  ofstream claimFile("claims.txt");
+  if (claimFile.is_open()) {
+    for (int i = 0; i < claimCount; i++) {
+      claimFile << claimItem[i] << "|" << claimUser[i] << "|" << claimFailed[i]
+                << "\n";
+    }
+    claimFile.close();
   }
 }
 
@@ -1446,7 +925,7 @@ int loginUser(string username, string password) {
     userFailed[index] = 0;
   }
 
-  if (databasePasswordMatches(userName[index], password)) {
+  if (userPassword[index] == password) {
     userFailed[index] = 0;
     return index;
   } else {
@@ -1528,6 +1007,17 @@ void releaseExpiredDepositReservations() {
       foundReservationExpiry[i] = 0;
     }
   }
+}
+
+bool lockerIsOccupied(int lockerIndex) {
+  for (int item = 0; item < foundCount; item++) {
+    if (foundLocker[item] == lockerIndex &&
+        foundStatus[item] != STATUS_DEPOSIT_CANCELLED &&
+        foundStatus[item] != STATUS_PICKED_UP) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Finds the first usable unoccupied locker.
@@ -1816,9 +1306,7 @@ int submitPickupCode(int claimantIndex, int itemIndex, string code) {
     return PICKUP_EXPIRED;
   }
 
-  if ((foundPickupCode[itemIndex] == "" ||
-       trim(code) != foundPickupCode[itemIndex]) &&
-      !databaseAccessCodeMatches(databasePickupCodeId[itemIndex], trim(code))) {
+  if (trim(code) != foundPickupCode[itemIndex]) {
     foundPickupFailed[itemIndex]++;
     if (foundPickupFailed[itemIndex] >= MAX_CLAIM_ATTEMPTS) {
       foundStatus[itemIndex] = STATUS_PICKUP_LOCKED;
@@ -1839,7 +1327,6 @@ void showPickupFlow(int claimantIndex, int itemIndex) {
     if (code == "0") {
       return;
     }
-    int failedBefore = foundPickupFailed[itemIndex];
     int result = submitPickupCode(claimantIndex, itemIndex, code);
 
     if (result == PICKUP_EXPIRED) {
@@ -1848,20 +1335,12 @@ void showPickupFlow(int claimantIndex, int itemIndex) {
       return;
     }
     if (result == PICKUP_LOCKED) {
-      if (foundStatus[itemIndex] == STATUS_PICKUP_LOCKED &&
-          foundPickupFailed[itemIndex] > failedBefore) {
-        databaseLogLockerEvent(foundLocker[itemIndex],
-                               databaseDepositId[itemIndex], "PIN_FAILURE",
-                               "Kode ambil salah; pengambilan dikunci.");
-      }
       saveAll();
       cout
           << "Kode ambil terkunci; admin telah diberi penanda verifikasi.\n";
       return;
     }
     if (result == PICKUP_WRONG_CODE) {
-      databaseLogLockerEvent(foundLocker[itemIndex], databaseDepositId[itemIndex],
-                             "PIN_FAILURE", "Kode ambil salah.");
       cout << "Kode salah. Percobaan tersisa: "
                 << MAX_CLAIM_ATTEMPTS - foundPickupFailed[itemIndex] << "\n";
       saveAll();
@@ -1878,24 +1357,18 @@ void showPickupFlow(int claimantIndex, int itemIndex) {
                            1, 3);
 
       if (sensor == 1) {
-        int lockerIndex = foundLocker[itemIndex];
         foundStatus[itemIndex] = STATUS_PICKED_UP;
         foundLocker[itemIndex] = -1;
         clearPickupDetails(itemIndex);
         saveAll();
-        databaseLogLockerEvent(lockerIndex, databaseDepositId[itemIndex], "PICKUP",
-                               "Barang diambil.");
         cout << "[OK] Pengambilan selesai. Loker kembali tersedia.\n";
         return;
       }
       if (sensor == 3) {
-        int lockerIndex = foundLocker[itemIndex];
         foundStatus[itemIndex] = STATUS_NEEDS_VERIFICATION;
         foundPickupCode[itemIndex] = "";
         foundPickupExpiry[itemIndex] = 0;
         saveAll();
-        databaseLogLockerEvent(lockerIndex, databaseDepositId[itemIndex], "ANOMALY",
-                               "Masalah loker dilaporkan saat pengambilan.");
         cout
             << "Anomali tercatat; loker dikunci untuk verifikasi admin.\n";
         return;
@@ -2030,15 +1503,11 @@ void showReportFoundScreen(int userIndex) {
       return;
     }
 
-    if ((foundDepositCode[itemIndex] != "" &&
-         code == foundDepositCode[itemIndex]) ||
-        databaseAccessCodeMatches(databaseDepositCodeId[itemIndex], code)) {
+    if (code == foundDepositCode[itemIndex]) {
       cout << "[OK] Pintu loker terbuka.\n";
       break;
     }
 
-    databaseLogLockerEvent(foundLocker[itemIndex], databaseDepositId[itemIndex],
-                           "PIN_FAILURE", "Kode titip salah.");
     foundDepositFailed[itemIndex]++;
     saveAll();
     if (foundDepositFailed[itemIndex] < MAX_CLAIM_ATTEMPTS) {
@@ -2069,8 +1538,6 @@ void showReportFoundScreen(int userIndex) {
       foundReservationExpiry[itemIndex] = 0;
       foundDepositFailed[itemIndex] = 0;
       saveAll();
-      databaseLogLockerEvent(foundLocker[itemIndex], databaseDepositId[itemIndex],
-                             "DROPOFF", "Barang dititipkan.");
       cout << "[OK] Penitipan selesai. Barang sekarang dapat dicari.\n";
       break;
     }
@@ -2081,8 +1548,6 @@ void showReportFoundScreen(int userIndex) {
       foundReservationExpiry[itemIndex] = 0;
       foundDepositFailed[itemIndex] = 0;
       saveAll();
-      databaseLogLockerEvent(foundLocker[itemIndex], databaseDepositId[itemIndex],
-                             "ANOMALY", "Masalah loker dilaporkan saat penitipan.");
       cout << "Anomali tercatat; loker dikunci untuk verifikasi admin.\n";
       break;
     }
@@ -2135,29 +1600,30 @@ void showReportLostScreen(int userIndex, string prefillName) {
 }
 
 void showMyClaimHistory(int userIndex) {
-  MYSQL_RES *result = databaseSelect(
-      "SELECT i.nama_barang, c.status, DATE_FORMAT(c.claimed_at, "
-      "'%Y-%m-%d %H:%i') FROM claims c JOIN items i ON i.id_item = c.id_item "
-      "WHERE c.nim_pengklaim = " + databaseQuote(userName[userIndex]) +
-      " ORDER BY c.claimed_at DESC, c.id_claim DESC");
-  if (result == 0) {
-    cout << "Riwayat klaim tidak dapat dimuat.\n";
-    return;
-  }
-
   cout << "\nRIWAYAT KLAIM SAYA\n" << UI_DIVIDER << "\n";
-  MYSQL_ROW row;
   bool hasClaims = false;
-  while ((row = mysql_fetch_row(result)) != 0) {
+  for (int i = 0; i < foundCount; i++) {
+    if (foundClaimant[i] != userIndex) {
+      continue;
+    }
     hasClaims = true;
-    cout << "\n" << databaseField(row, 0) << "\n";
-    cout << "Status   : " << databaseField(row, 1) << "\n";
-    cout << "Diajukan : " << databaseField(row, 2) << "\n";
+    cout << "\n" << foundName[i] << "\n";
+    cout << "Status   : " << foundStatus[i] << "\n";
+  }
+  for (int i = 0; i < claimCount; i++) {
+    if (claimUser[i] != userIndex || claimItem[i] < 0 ||
+        claimItem[i] >= foundCount) {
+      continue;
+    }
+    hasClaims = true;
+    cout << "\n" << foundName[claimItem[i]] << "\n";
+    cout << "Status   : "
+         << (claimFailed[i] >= MAX_CLAIM_ATTEMPTS ? "Diblokir" : "CANCELLED")
+         << "\n";
   }
   if (!hasClaims) {
     cout << "Kamu belum memiliki riwayat klaim.\n";
   }
-  mysql_free_result(result);
 }
 
 // Shows the active user’s found-item reports and claims.
@@ -2480,20 +1946,11 @@ void showAdminMenu() {
 
 // Starts the application and routes guest, student, and admin menus.
 int main() {
-  if (!databaseConnect()) {
-    return 1;
-  }
-
   loadAll();
-  bool seededDemoData = userCount == 0;
-  if (seededDemoData) {
+  if (userCount == 0) {
     loadDemoData();
   }
-  int usersBeforeAdmin = userCount;
   ensureDemoAdmin();
-  if (seededDemoData || userCount != usersBeforeAdmin) {
-    saveAll();
-  }
 
   bool isRunning = true;
   while (isRunning) {
@@ -2533,6 +1990,5 @@ int main() {
     }
   }
 
-  databaseDisconnect();
   return 0;
 }

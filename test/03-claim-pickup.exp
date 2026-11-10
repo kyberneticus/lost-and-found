@@ -25,7 +25,7 @@ sendLine $item
 sendLine 0
 sendLine ""
 expect {
-  -re "\\[([0-9]+)\\] $item" { set itemNumber $expect_out(1,string) }
+  -re [format {\[([0-9]+)\] %s} $item] { set itemNumber $expect_out(1,string) }
   timeout {
     puts stderr "Barang test tidak muncul dalam hasil pencarian."
     exit 1
@@ -46,7 +46,7 @@ sendLine 0
 sendLine ""
 sendLine 2
 expect {
-  -re "\\[([0-9]+)\\] $item" { set pendingItemNumber $expect_out(1,string) }
+  -re [format {\[([0-9]+)\] %s} $item] { set pendingItemNumber $expect_out(1,string) }
   timeout {
     puts stderr "Klaim aktif tidak muncul untuk pengambilan ulang."
     exit 1

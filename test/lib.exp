@@ -24,26 +24,10 @@ proc expectText {pattern} {
 }
 
 proc prepareTest {} {
-  global project binary env
-
-  foreach variable {DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD} {
-    if {![info exists env($variable)]} {
-      puts stderr "Atur $variable sebelum menjalankan test."
-      exit 1
-    }
-  }
-  if {![info exists env(ALLOW_MUTATING_TEST_DATABASE)] ||
-      $env(ALLOW_MUTATING_TEST_DATABASE) ne "1"} {
-    puts stderr "Set ALLOW_MUTATING_TEST_DATABASE=1 untuk menjalankan test pada database uji khusus."
-    exit 1
-  }
+  global project binary
 
   file mkdir "$project/build"
-  set buildCommand [list g++ -std=c++11 -Wall -Wextra "$project/src/main.cpp"]
-  foreach flag [split [exec mariadb_config --cflags --libs]] {
-    lappend buildCommand $flag
-  }
-  lappend buildCommand -o $binary
+  set buildCommand [list g++ -std=c++11 -Wall -Wextra "$project/src/main.cpp" -o $binary]
   if {[catch {eval exec $buildCommand} message]} {
     puts stderr $message
     exit 1
@@ -51,7 +35,7 @@ proc prepareTest {} {
 }
 
 proc startApp {} {
-  global binary
+  global binary spawn_id
 
   set workspace "/tmp/lostfound-test-[pid]-[clock microseconds]"
   file delete -force $workspace

@@ -1,11 +1,52 @@
 # Lost and Found Management System
 
-## Windows prerequisites
+Kerangka proyek C++ terminal untuk tim mahasiswa semester 1. Program akan mencatat barang temuan, laporan kehilangan, dan klaim barang. Kerangka ini sengaja berisi deklarasi data, kontrak fungsi, stub aman, dan TODO kecil agar setiap anggota dapat mengisi logika bisnis secara bertahap.
 
-Open **PowerShell as Administrator** in the project root, then run:
+## Build dan jalankan
 
-```powershell
-.\scripts\install-windows-prerequisites.ps1
+**Patokan utama:** seluruh program berada di `src/main.cpp`; kompilasi file itu dengan perintah berikut.
+
+```bash
+g++ -std=c++11 -Wall -Wextra src/main.cpp -o lostfound
+./lostfound
 ```
 
-The script checks `winget`, refreshes its source, and installs the Visual C++ Build Tools and MariaDB (which supplies `<mysql/mysql.h>` and its client library). It stops with the official App Installer prerequisite if `winget` is unavailable. Open a new terminal after it finishes; configure `DB_HOST`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` before running the application.
+
+Pilih `3` pada menu tamu untuk keluar. Setelah TODO diisi, jalankan ulang skenario di `tests/manual_tests.md`.
+
+## Struktur kode
+
+Semua kode ada dalam satu file: `src/main.cpp`. Setiap pemilik bekerja hanya pada bagian yang diberi banner namanya; library dan `using namespace std;` hanya ada sekali di bagian paling atas.
+
+## Kepemilikan bagian
+
+| Anggota | Bagian |
+| --- | --- |
+| A | data, string_utils, id_utils, storage |
+| B | auth, auth_screen |
+| C | date_utils, items, item_screen |
+| D | input_helpers, claims, claim_screen, main() |
+
+## Aturan Git
+
+1. Jalankan `git pull --rebase` sebelum mulai bekerja.
+2. Buat satu branch per fitur, misalnya `feature/auth-register`.
+3. Hanya edit bagian milik sendiri; jika harus mengubah bagian anggota lain, beri tahu pemiliknya lebih dahulu.
+4. Jangan memformat ulang seluruh `src/main.cpp`.
+5. Buka PR kecil untuk pekerjaan yang siap diuji.
+6. Review silang berputar: **A → B → C → D → A**.
+7. Jangan merge langsung ke branch utama tanpa review.
+
+## Disederhanakan dengan sengaja
+
+- Fase 1 **tidak memakai** `.h`, `struct`, `vector`, class, pointer, referensi, atau template. Semua data ada pada array paralel global.
+- Semua bagian sengaja digabung dalam satu `main.cpp`; banner kepemilikan menjaga pembagian kerja tetap jelas.
+- Password disimpan polos (apa adanya). Ini tidak aman untuk aplikasi nyata dan hanya boleh untuk latihan.
+- Akun yang terkunci tidak memiliki jalur buka dari menu; satu-satunya cara saat ini adalah mengedit data.
+- Penyimpanan file `data/*.txt` bersifat opsional. Stub `loadAll`/`saveAll` aman bila belum diisi.
+- Tidak ada penghapusan data; indeks array tidak bergeser. Admin demo (`admin` / `admin123`) saat ini hanya memiliki menu logout sampai modul loker dan anomali ditambahkan.
+
+Baca `docs/data-model.md` sebelum mengubah array dan `docs/TASKS.md` sebelum mulai mengisi TODO.
+
+azhri hytam
+mudho

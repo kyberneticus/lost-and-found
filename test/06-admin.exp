@@ -33,7 +33,7 @@ for {set attempt 1} {$attempt <= 3} {incr attempt} {
   sendLine 0
   sendLine ""
   expect {
-    -re "\\[([0-9]+)\\] $claimItem" { set itemNumber $expect_out(1,string) }
+    -re [format {\[([0-9]+)\] %s} $claimItem] { set itemNumber $expect_out(1,string) }
     timeout {
       puts stderr "Barang test untuk klaim admin tidak ditemukan."
       exit 1
@@ -55,7 +55,7 @@ logoutStudent
 loginStudent admin admin123
 sendLine 1
 expect {
-  -re "\\[([0-9]+)\\] $anomalyItem" { set anomalyNumber $expect_out(1,string) }
+  -re [format {\[([0-9]+)\] %s} $anomalyItem] { set anomalyNumber $expect_out(1,string) }
   timeout {
     puts stderr "Anomali test tidak muncul di menu admin."
     exit 1
@@ -69,7 +69,7 @@ sendLine ""
 
 sendLine 3
 expect {
-  -re "\\[([0-9]+)\\] $claimItem" { set blockedClaimNumber $expect_out(1,string) }
+  -re [format {\[([0-9]+)\] %s} $claimItem] { set blockedClaimNumber $expect_out(1,string) }
   timeout {
     puts stderr "Klaim terblokir test tidak muncul di menu admin."
     exit 1
@@ -97,7 +97,7 @@ expectText {MAIN MENU}
 loginStudent $claimant $password
 sendLine 2
 expect {
-  -re "\\[([0-9]+)\\] $claimItem" { set pendingItemNumber $expect_out(1,string) }
+  -re [format {\[([0-9]+)\] %s} $claimItem] { set pendingItemNumber $expect_out(1,string) }
   timeout {
     puts stderr "Klaim aktif tidak tersedia untuk pengambilan."
     exit 1
@@ -114,7 +114,7 @@ logoutStudent
 loginStudent admin admin123
 sendLine 1
 expect {
-  -re "\\[([0-9]+)\\] $claimItem" { set resetItemNumber $expect_out(1,string) }
+  -re [format {\[([0-9]+)\] %s} $claimItem] { set resetItemNumber $expect_out(1,string) }
   timeout {
     puts stderr "Anomali pengambilan tidak muncul di menu admin."
     exit 1
