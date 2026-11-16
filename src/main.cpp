@@ -2042,9 +2042,8 @@ void showMyReportsScreen(int userIndex) {
 }
 
 // Runs the terminal search, claim, and pickup flow.
-void showClaimFlowScreen(int userIndex) {
-  printHeader("Cari dan Klaim Barang");
-
+// Lists the claims this user may pick up; true when the caller should stop.
+bool showPendingClaims(int userIndex) {
   int pendingClaimCount = 0;
   for (int i = 0; i < foundCount; i++) {
     if (foundStatus[i] == STATUS_CLAIM_PENDING &&
@@ -2053,64 +2052,71 @@ void showClaimFlowScreen(int userIndex) {
     }
   }
 
-  if (pendingClaimCount > 0) {
-    cout << "\nKLAIM DISETUJUI BELUM DIAMBIL\n" << UI_DIVIDER << "\n";
-    for (int i = 0; i < foundCount; i++) {
-      if (foundStatus[i] == STATUS_CLAIM_PENDING &&
-          foundClaimant[i] == userIndex) {
-        cout << "  [" << toDisplayNo(i) << "] " << foundName[i] << "\n";
-      }
-    }
+  if (pendingClaimCount == 0) {
+    return false;
+  }
 
-    int choice = readInt("1. Cari dan klaim barang baru\n"
-                         "2. Ambil barang\n"
-                         "Pilih: ",
-                         1, 2);
-    if (choice == 2) {
-      int displayNo = readInt("Nomor barang yang akan diambil: ", 1, foundCount);
-      int itemIndex = toIndex(displayNo);
-      if (foundStatus[itemIndex] != STATUS_CLAIM_PENDING ||
-          foundClaimant[itemIndex] != userIndex) {
-        cout << "Barang tersebut tidak memiliki klaim aktifmu.\n";
-        pauseScreen();
-        return;
-      }
-      showPickupFlow(userIndex, itemIndex);
-      return;
+  cout << "\nKLAIM DISETUJUI BELUM DIAMBIL\n" << UI_DIVIDER << "\n";
+  for (int i = 0; i < foundCount; i++) {
+    if (foundStatus[i] == STATUS_CLAIM_PENDING &&
+        foundClaimant[i] == userIndex) {
+      cout << "  [" << toDisplayNo(i) << "] " << foundName[i] << "\n";
     }
   }
 
-  string keyword = readLine("Nama atau deskripsi barang: ");
-  string category = selectCategory(true);
-  string location = selectLocation(true);
-
-  int resultCount = searchAvailableItems(keyword, category, location);
-
-  if (resultCount == 0) {
-    cout << "\nBarang tidak ditemukan\n";
-    int choice = readInt("Apakah anda ingin membuat laporan barang hilang?\n"
-                         "1. Ya\n"
-                         "2. Tidak\n"
-                         "Pilih: ",
-                         1, 2);
-
-    if (choice == 1) {
-      showReportLostScreen(userIndex, keyword);
-    }
-
-    return;
+  int choice = readInt("1. Cari dan klaim barang baru\n"
+                       "2. Ambil barang\n"
+                       "Pilih: ",
+                       1, 2);
+  if (choice == 1) {
+    return false;
   }
 
+  int displayNo = readInt("Nomor barang yang akan diambil: ", 1, foundCount);
+  int itemIndex = toIndex(displayNo);
+  if (foundStatus[itemIndex] != STATUS_CLAIM_PENDING ||
+      foundClaimant[itemIndex] != userIndex) {
+    cout << "Barang tersebut tidak memiliki klaim aktifmu.\n";
+    pauseScreen();
+    return true;
+  }
+
+  showPickupFlow(userIndex, itemIndex);
+  return true;
+}
+
+// Asks the three search filters, passing them back by reference.
+void askSearchFilters(string &keyword, string &category, string &location) {
+  keyword = readLine("Nama atau deskripsi barang: ");
+  category = selectCategory(true);
+  location = selectLocation(true);
+}
+
+// Offers a lost report when the search found nothing.
+void showNoResultOffer(int userIndex, string keyword) {
+  cout << "\nBarang tidak ditemukan\n";
+  int choice = readInt("Apakah anda ingin membuat laporan barang hilang?\n"
+                       "1. Ya\n"
+                       "2. Tidak\n"
+                       "Pilih: ",
+                       1, 2);
+
+  if (choice == 1) {
+    showReportLostScreen(userIndex, keyword);
+  }
+}
+
+// Prints the search result cards and returns the chosen item index.
+int showSearchResults() {
   cout << "\nDAFTAR BARANG DITEMUKAN\n" << UI_DIVIDER << "\n";
 
   int maxDisplayNo = 0;
-
   for (int i = 0; i < searchResultCount; i++) {
     int index = searchResult[i];
     int displayNo = toDisplayNo(index);
 
     cout << "\n[" << displayNo << "] " << foundName[index] << "\n"
-              << UI_DIVIDER << "\n";
+         << UI_DIVIDER << "\n";
     cout << "Kategori   : " << foundCategory[index] << "\n";
     cout << "Lokasi     : " << foundLocation[index] << "\n";
     cout << "Tanggal    : " << foundDate[index] << "\n";
@@ -2124,33 +2130,22 @@ void showClaimFlowScreen(int userIndex) {
   int displayNo =
       readInt("\nMasukkan nomor barang yang ingin diklaim: ", 1, maxDisplayNo);
 
-  int itemIndex = toIndex(displayNo);
+  return toIndex(displayNo);
+}
 
-  bool isFound = false;
-
+// Checks whether a slot is one of the items currently listed by the search.
+bool isSearchResult(int itemIndex) {
   for (int i = 0; i < searchResultCount; i++) {
     if (searchResult[i] == itemIndex) {
-      isFound = true;
-      break;
+      return true;
     }
   }
 
-  if (!isFound) {
-    cout << "\nNomor barang tidak tersedia dalam hasil pencarian.\n";
-    pauseScreen();
-    return;
-  }
-  if (foundReporter[itemIndex] == userIndex) {
-    cout << "\nKamu tidak dapat mengklaim barang temuanmu sendiri.\n";
-    pauseScreen();
-    return;
-  }
-  if (getFailedClaimCount(itemIndex, userIndex) >= MAX_CLAIM_ATTEMPTS) {
-    cout << "\nKamu sudah mencapai batas percobaan klaim; hubungi admin.\n";
-    pauseScreen();
-    return;
-  }
+  return false;
+}
 
+// Asks the secret answer, submits the claim, and prints the outcome.
+void showClaimAttempt(int userIndex, int itemIndex) {
   string secretAnswer =
       readLine("Masukkan detail khusus untuk membuktikan kepemilikan: ");
 
@@ -2172,8 +2167,7 @@ void showClaimFlowScreen(int userIndex) {
     saveAll();
 
   } else if (claimResult == CLAIM_TOO_MANY_ATTEMPTS) {
-    cout
-        << "\nKamu sudah mencapai batas percobaan klaim; hubungi admin.\n";
+    cout << "\nKamu sudah mencapai batas percobaan klaim; hubungi admin.\n";
     saveAll();
 
   } else if (claimResult == CLAIM_ITEM_NOT_FOUND) {
@@ -2193,6 +2187,45 @@ void showClaimFlowScreen(int userIndex) {
   }
 
   pauseScreen();
+}
+
+// Runs the terminal search, claim, and pickup flow.
+void showClaimFlowScreen(int userIndex) {
+  printHeader("Cari dan Klaim Barang");
+
+  if (showPendingClaims(userIndex)) {
+    return;
+  }
+
+  string keyword = "";
+  string category = "";
+  string location = "";
+  askSearchFilters(keyword, category, location);
+
+  if (searchAvailableItems(keyword, category, location) == 0) {
+    showNoResultOffer(userIndex, keyword);
+    return;
+  }
+
+  int itemIndex = showSearchResults();
+
+  if (!isSearchResult(itemIndex)) {
+    cout << "\nNomor barang tidak tersedia dalam hasil pencarian.\n";
+    pauseScreen();
+    return;
+  }
+  if (foundReporter[itemIndex] == userIndex) {
+    cout << "\nKamu tidak dapat mengklaim barang temuanmu sendiri.\n";
+    pauseScreen();
+    return;
+  }
+  if (getFailedClaimCount(itemIndex, userIndex) >= MAX_CLAIM_ATTEMPTS) {
+    cout << "\nKamu sudah mencapai batas percobaan klaim; hubungi admin.\n";
+    pauseScreen();
+    return;
+  }
+
+  showClaimAttempt(userIndex, itemIndex);
 }
 
 int showBlockedClaims() {
