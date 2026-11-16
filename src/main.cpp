@@ -13,6 +13,13 @@
 
 using namespace std;
 
+// Alur besar di docs/flowchart.svg memakai nama fungsi ini:
+//   titipBarang()   Proses Titip Barang
+//   CariAndClaim()  Proses Cari, Klaim, dan Verifikasi
+//   ambilBarang()   Proses Ambil Barang
+//   riwayatSaya()   Proses Riwayat Saya
+//   Admin()         Proses Admin, Anomali, dan Kedaluwarsa
+
 const int MAX_USERS = 100;
 const int MAX_FOUND = 200;
 const int MAX_LOST = 200;
@@ -152,11 +159,12 @@ int searchResultCount = 0;
 
 // Forward declarations for helpers used by the storage layer.
 string hashText(string text);
-void showAdminMenu();
-void showClaimFlowScreen(int userIndex);
-void showMyReportsScreen(int userIndex);
+void Admin();
+void ambilBarang(int claimantIndex, int itemIndex);
+void CariAndClaim(int userIndex);
+void riwayatSaya(int userIndex);
 void showRegisterScreen();
-void showReportFoundScreen(int userIndex);
+void titipBarang(int userIndex);
 int showLoginScreen();
 int findUserByUsername(string username);
 int findClaimRecord(int itemIndex, int userIndex);
@@ -1671,7 +1679,7 @@ int submitPickupCode(int claimantIndex, int itemIndex, string code) {
 }
 
 // Runs the terminal pickup and locker-sensor simulation.
-void showPickupFlow(int claimantIndex, int itemIndex) {
+void ambilBarang(int claimantIndex, int itemIndex) {
   while (true) {
     string code = trim(readLine("Masukkan kode ambil di loker (0 untuk kembali): "));
     if (code == "0") {
@@ -1880,7 +1888,7 @@ void showDepositFlow(int itemIndex) {
 }
 
 // Runs the terminal locker deposit screen.
-void showReportFoundScreen(int userIndex) {
+void titipBarang(int userIndex) {
   printHeader("Titip Barang");
 
   string name = readLine("Nama barang: ");
@@ -2045,7 +2053,7 @@ void showMyLostReports(int userIndex) {
 }
 
 // Shows the active user's found items, lost reports, and claims.
-void showMyReportsScreen(int userIndex) {
+void riwayatSaya(int userIndex) {
   printHeader("Laporan Saya");
 
   showMyFoundReports(userIndex);
@@ -2094,7 +2102,7 @@ bool showPendingClaims(int userIndex) {
     return true;
   }
 
-  showPickupFlow(userIndex, itemIndex);
+  ambilBarang(userIndex, itemIndex);
   return true;
 }
 
@@ -2171,7 +2179,7 @@ void showClaimAttempt(int userIndex, int itemIndex) {
     }
     cout << "Kode ambil berlaku 24 jam: " << issuedCode << "\n";
     saveAll();
-    showPickupFlow(userIndex, itemIndex);
+    ambilBarang(userIndex, itemIndex);
 
   } else if (claimResult == CLAIM_WRONG_DETAIL) {
     cout << "\nDetail yang kamu masukkan salah.\n";
@@ -2203,7 +2211,7 @@ void showClaimAttempt(int userIndex, int itemIndex) {
 }
 
 // Runs the terminal search, claim, and pickup flow.
-void showClaimFlowScreen(int userIndex) {
+void CariAndClaim(int userIndex) {
   printHeader("Cari dan Klaim Barang");
 
   if (showPendingClaims(userIndex)) {
@@ -2416,11 +2424,11 @@ void showStudentMenu(int userIndex) {
   while (true) {
     int choice = showMenu("MENU MAHASISWA", options, 4);
     if (choice == 1) {
-      showReportFoundScreen(userIndex);
+      titipBarang(userIndex);
     } else if (choice == 2) {
-      showClaimFlowScreen(userIndex);
+      CariAndClaim(userIndex);
     } else if (choice == 3) {
-      showMyReportsScreen(userIndex);
+      riwayatSaya(userIndex);
     } else {
       return;
     }
@@ -2430,7 +2438,7 @@ void showStudentMenu(int userIndex) {
 // Sends a logged in user to the menu of their role.
 void routeUser(int userIndex) {
   if (userRole[userIndex] == ROLE_ADMIN) {
-    showAdminMenu();
+    Admin();
   } else {
     showStudentMenu(userIndex);
   }
@@ -2456,7 +2464,7 @@ void showMainMenu() {
 }
 
 // Runs the terminal admin menu.
-void showAdminMenu() {
+void Admin() {
   const string options[6] = {"Lihat anomali", "Tangani barang",
                              "Tangani klaim diblokir", "Status loker",
                              "Lihat log loker", "Logout"};
