@@ -152,6 +152,12 @@ int searchResultCount = 0;
 
 // Forward declarations for helpers used by the storage layer.
 string hashText(string text);
+void showAdminMenu();
+void showClaimFlowScreen(int userIndex);
+void showMyReportsScreen(int userIndex);
+void showRegisterScreen();
+void showReportFoundScreen(int userIndex);
+int showLoginScreen();
 int findUserByUsername(string username);
 int findClaimRecord(int itemIndex, int userIndex);
 
@@ -503,6 +509,17 @@ void printHeader(string title) {
   cout << "                 LOST & FOUND LOCKER\n";
   cout << UI_BORDER << "\n";
   cout << "  " << title << "\n" << UI_DIVIDER << "\n";
+}
+
+// Prints a numbered menu and returns the chosen number.
+int showMenu(string title, const string options[], int count) {
+  printHeader(title);
+  for (int i = 0; i < count; i++) {
+    cout << "  " << i + 1 << ". " << options[i] << "\n";
+  }
+  cout << UI_DIVIDER << "\n";
+
+  return readInt("Pilih menu [1-" + to_string(count) + "]: ", 1, count);
 }
 
 // Lets the user pick one entry from a fixed list, or "" when 0 is allowed.
@@ -2345,18 +2362,61 @@ void showAdminLogs() {
   }
 }
 
+// Runs the student menu until the user logs out.
+void showStudentMenu(int userIndex) {
+  const string options[4] = {"Titip barang", "Cari dan klaim barang",
+                             "Riwayat saya", "Logout"};
+
+  while (true) {
+    int choice = showMenu("MENU MAHASISWA", options, 4);
+    if (choice == 1) {
+      showReportFoundScreen(userIndex);
+    } else if (choice == 2) {
+      showClaimFlowScreen(userIndex);
+    } else if (choice == 3) {
+      showMyReportsScreen(userIndex);
+    } else {
+      return;
+    }
+  }
+}
+
+// Sends a logged in user to the menu of their role.
+void routeUser(int userIndex) {
+  if (userRole[userIndex] == ROLE_ADMIN) {
+    showAdminMenu();
+  } else {
+    showStudentMenu(userIndex);
+  }
+}
+
+// Runs the guest menu until the program is closed.
+void showMainMenu() {
+  const string options[3] = {"Register mahasiswa", "Login", "Keluar"};
+
+  while (true) {
+    int choice = showMenu("MAIN MENU", options, 3);
+    if (choice == 1) {
+      showRegisterScreen();
+    } else if (choice == 2) {
+      int userIndex = showLoginScreen();
+      if (userIndex >= 0) {
+        routeUser(userIndex);
+      }
+    } else {
+      return;
+    }
+  }
+}
+
 // Runs the terminal admin menu.
 void showAdminMenu() {
+  const string options[6] = {"Lihat anomali", "Tangani barang",
+                             "Tangani klaim diblokir", "Status loker",
+                             "Lihat log loker", "Logout"};
   bool active = true;
   while (active) {
-    printHeader("MENU ADMIN");
-    cout << "  1. Lihat anomali\n";
-    cout << "  2. Tangani barang\n";
-    cout << "  3. Tangani klaim diblokir\n";
-    cout << "  4. Status loker\n";
-    cout << "  5. Lihat log loker\n";
-    cout << "  6. Logout\n" << UI_DIVIDER << "\n";
-    int choice = readInt("Pilih menu [1-6]: ", 1, 6);
+    int choice = showMenu("MENU ADMIN", options, 6);
 
     if (choice == 1) {
       showAdminAnomalies();
@@ -2390,45 +2450,8 @@ int main() {
   loadAll();
   ensureAdmin();
   saveAll();
-
-  bool isRunning = true;
-  while (isRunning) {
-    printHeader("MAIN MENU");
-    cout << "  1. Register mahasiswa\n";
-    cout << "  2. Login\n";
-    cout << "  3. Keluar\n" << UI_DIVIDER << "\n";
-    int guestChoice = readInt("Pilih menu [1-3]: ", 1, 3);
-
-    if (guestChoice == 1) {
-      showRegisterScreen();
-    } else if (guestChoice == 2) {
-      int userIndex = showLoginScreen();
-      if (userIndex >= 0 && userRole[userIndex] == ROLE_ADMIN) {
-        showAdminMenu();
-        userIndex = -1;
-      }
-      while (userIndex >= 0) {
-        printHeader("MENU MAHASISWA");
-        cout << "  1. Titip barang\n";
-        cout << "  2. Cari dan klaim barang\n";
-        cout << "  3. Riwayat saya\n";
-        cout << "  4. Logout\n" << UI_DIVIDER << "\n";
-        int userChoice = readInt("Pilih menu [1-4]: ", 1, 4);
-        if (userChoice == 1) {
-          showReportFoundScreen(userIndex);
-        } else if (userChoice == 2) {
-          showClaimFlowScreen(userIndex);
-        } else if (userChoice == 3) {
-          showMyReportsScreen(userIndex);
-        } else {
-          userIndex = -1;
-        }
-      }
-    } else {
-      isRunning = false;
-    }
-  }
-
+  showMainMenu();
   dbClose();
+
   return 0;
 }
