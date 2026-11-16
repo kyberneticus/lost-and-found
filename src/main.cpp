@@ -2001,10 +2001,10 @@ void showMyClaimHistory(int userIndex) {
 }
 
 // Shows the active user’s found-item reports and claims.
-void showMyReportsScreen(int userIndex) {
-  printHeader("Laporan Saya");
-
+// Shows the found items this user reported.
+void showMyFoundReports(int userIndex) {
   int count = listItemsByReporter(userIndex);
+
   cout << "\nLAPORAN TEMUAN SAYA\n" << UI_DIVIDER << "\n";
   if (count == 0) {
     cout << "Kamu belum memiliki laporan barang temuan.\n";
@@ -2013,19 +2013,24 @@ void showMyReportsScreen(int userIndex) {
   for (int i = 0; i < searchResultCount; i++) {
     int index = searchResult[i];
 
-    cout << "\n[" << toDisplayNo(index) << "] " << foundName[index]
-              << "\n" << UI_DIVIDER << "\n";
+    cout << "\n[" << toDisplayNo(index) << "] " << foundName[index] << "\n"
+         << UI_DIVIDER << "\n";
     cout << "Lokasi   : " << foundLocation[index] << "\n";
     cout << "Tanggal  : " << foundDate[index] << "\n";
     cout << "Status   : " << foundStatus[index] << "\n";
   }
+}
 
+// Shows the lost reports this user filed.
+void showMyLostReports(int userIndex) {
   cout << "\nLAPORAN HILANG SAYA\n" << UI_DIVIDER << "\n";
+
   int lostShown = 0;
   for (int i = 0; i < lostCount; i++) {
     if (lostReporter[i] != userIndex) {
       continue;
     }
+
     lostShown++;
     cout << "\n" << lostName[i] << "\n";
     cout << "Lokasi   : " << lostLocation[i] << "\n";
@@ -2033,10 +2038,18 @@ void showMyReportsScreen(int userIndex) {
     cout << "Status   : " << lostStatus[i] << "\n";
     cout << "Deskripsi: " << lostDescription[i] << "\n";
   }
+
   if (lostShown == 0) {
     cout << "Kamu belum memiliki laporan barang hilang.\n";
   }
+}
 
+// Shows the active user's found items, lost reports, and claims.
+void showMyReportsScreen(int userIndex) {
+  printHeader("Laporan Saya");
+
+  showMyFoundReports(userIndex);
+  showMyLostReports(userIndex);
   showMyClaimHistory(userIndex);
   pauseScreen();
 }
